@@ -596,8 +596,8 @@ class Geodir_REST_Reviews_Controller extends WP_REST_Comments_Controller {
             $data['latitude'] = $comment->latitude;
             $data['longitude'] = $comment->longitude;
             $data['review'] = $comment->review;
-            $data['read_unread'] = $comment->read_unread;
-            $data['total_images'] = $comment->total_images;
+            $data['read_unread'] = isset( $comment->read_unread ) ? $comment->read_unread : NULL;
+            $data['total_images'] = isset( $comment->total_images ) ? $comment->total_images : NULL;
         }
 
 		$schema = $this->get_item_schema();

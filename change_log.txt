@@ -1,2 +1,5 @@
+v0.0.2
+Fail to get reviews when review rating addon not installed - FIXED
+
 v0.0.1
 Alpha release.

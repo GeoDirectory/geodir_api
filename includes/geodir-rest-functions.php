@@ -590,6 +590,8 @@ function geodir_rest_get_field_by_name($field_name, $post_type) {
 function geodir_rest_comments_clauses( $clauses, $comment_query ) {
     global $wpdb;
     
+    $is_reviewrating = function_exists( 'geodir_reviewrating_comments_shorting' ) ? true : false;
+    
     $comment_sorting = $comment_query->query_vars['orderby'];
     if ( $comment_sorting == 'comment_date' ) {
         $comment_sorting = $comment_query->query_vars['order'] == 'asc' ? 'oldest' : 'latest';
@@ -597,9 +599,16 @@ function geodir_rest_comments_clauses( $clauses, $comment_query ) {
      
     $_REQUEST['comment_sorting'] = $comment_sorting;
     
-    $review_sorting = geodir_reviewrating_comments_shorting( $clauses );
+    if ( $is_reviewrating ) {
+        $review_sorting = geodir_reviewrating_comments_shorting( $clauses );
+    } else {
+        $review_sorting = array( 'orderby' =>  $clauses['orderby'] );
+    }
     
-    $clauses['fields'] .= ", gdr.`id` AS review_id, gdr.`post_title`, gdr.`post_type`, gdr.`rating_ip`, gdr.`ratings`, gdr.`overall_rating`, gdr.`comment_images`, gdr.`wasthis_review`, gdr.`status` AS review_status, gdr.`post_status` AS review_post_status, gdr.`post_date`, gdr.`post_city` AS city, gdr.`post_region` AS region, gdr.`post_country` AS country, gdr.`post_latitude` AS latitude, gdr.`post_longitude` AS longitude, gdr.`comment_content` AS city, gdr.`read_unread`, gdr.`total_images`";
+    $clauses['fields'] .= ", gdr.`id` AS review_id, gdr.`post_title`, gdr.`post_type`, gdr.`rating_ip`, gdr.`ratings`, gdr.`overall_rating`, gdr.`comment_images`, gdr.`wasthis_review`, gdr.`status` AS review_status, gdr.`post_status` AS review_post_status, gdr.`post_date`, gdr.`post_city` AS city, gdr.`post_region` AS region, gdr.`post_country` AS country, gdr.`post_latitude` AS latitude, gdr.`post_longitude` AS longitude, gdr.`comment_content` AS city";
+    if ( $is_reviewrating ) {
+        $clauses['fields'] .= ", gdr.`read_unread`, gdr.`total_images`";
+    }
     $clauses['join'] .= " LEFT JOIN " . GEODIR_REVIEW_TABLE . " AS gdr ON gdr.comment_id=" . $wpdb->comments . ".comment_ID";
     $clauses['orderby'] = str_replace( GEODIR_REVIEW_TABLE, 'gdr', $review_sorting['orderby'] );
     return $clauses;
@@ -608,7 +617,14 @@ function geodir_rest_comments_clauses( $clauses, $comment_query ) {
 function geodir_rest_get_comment( $comment ) {
     global $wpdb;
     
-    $query = "SELECT gdr.`id` AS review_id, gdr.`post_title`, gdr.`post_type`, gdr.`rating_ip`, gdr.`ratings`, gdr.`overall_rating`, gdr.`comment_images`, gdr.`wasthis_review`, gdr.`status` AS review_status, gdr.`post_status` AS review_post_status, gdr.`post_date`, gdr.`post_city` AS city, gdr.`post_region` AS region, gdr.`post_country` AS country, gdr.`post_latitude` AS latitude, gdr.`post_longitude` AS longitude, gdr.`comment_content` AS review, gdr.`read_unread`, gdr.`total_images` FROM " . GEODIR_REVIEW_TABLE . " AS gdr WHERE gdr.comment_id = " . (int)$comment->comment_ID;
+    $is_reviewrating = function_exists( 'geodir_reviewrating_comments_shorting' ) ? true : false;
+    
+    $fields = '';
+    if ( $is_reviewrating ) {
+        $fields = ", gdr.`read_unread`, gdr.`total_images`";
+    }
+    
+    $query = "SELECT gdr.`id` AS review_id, gdr.`post_title`, gdr.`post_type`, gdr.`rating_ip`, gdr.`ratings`, gdr.`overall_rating`, gdr.`comment_images`, gdr.`wasthis_review`, gdr.`status` AS review_status, gdr.`post_status` AS review_post_status, gdr.`post_date`, gdr.`post_city` AS city, gdr.`post_region` AS region, gdr.`post_country` AS country, gdr.`post_latitude` AS latitude, gdr.`post_longitude` AS longitude, gdr.`comment_content` AS review " . $fields . " FROM " . GEODIR_REVIEW_TABLE . " AS gdr WHERE gdr.comment_id = " . (int)$comment->comment_ID;
     $review = $wpdb->get_row( $query );
     
     $comment = (object)array_merge((array)$comment, (array)$review);

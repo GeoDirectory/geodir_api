@@ -28,6 +28,10 @@ if ( !class_exists('Geodir_REST') ) {
         private static $instance;
             
         public static function initialize() {
+            if ( !defined( 'REST_API_VERSION' ) ) {
+                return;
+            }
+            
             if ( !isset( self::$instance ) && !( self::$instance instanceof Geodir_REST ) ) {
                 self::$instance = new Geodir_REST;
                 self::$instance->actions();
@@ -103,18 +107,28 @@ if ( !class_exists('Geodir_REST') ) {
             require_once( GEODIR_REST_PLUGIN_DIR . 'language.php' );
         }
         
-        public function activation() {
+        public static function activation() {
         }
         
-        public function deactivation() {
+        public static function deactivation() {
         }
         
-        public function uninstall() {
+        public static function uninstall() {
         }
         
         public function includes() {
-            require_once( GEODIR_REST_PLUGIN_DIR . 'includes/class-geodir-rest-listings-controller.php' );
-            require_once( GEODIR_REST_PLUGIN_DIR . 'includes/class-geodir-rest-reviews-controller.php' );
+            if (!is_admin()) {
+                if ( !function_exists( 'is_plugin_active' ) ) {
+                    require_once( ABSPATH . 'wp-admin/includes/plugin.php' );
+                }
+                
+                if ( !is_plugin_active( 'rest-api/plugin.php' ) ) {
+                    include_once( GEODIR_REST_PLUGIN_DIR . 'includes/rest-api/plugin.php' );
+                }
+                
+                require_once( GEODIR_REST_PLUGIN_DIR . 'includes/class-geodir-rest-listings-controller.php' );
+                require_once( GEODIR_REST_PLUGIN_DIR . 'includes/class-geodir-rest-reviews-controller.php' );
+            }
             
             include_once( GEODIR_REST_PLUGIN_DIR . 'includes/geodir-rest-functions.php' );
         }
@@ -205,13 +219,6 @@ if ( !class_exists('Geodir_REST') ) {
             $controller->register_routes();
         }
     }
-}
-
-if ( !function_exists( 'is_plugin_active' ) ) {
-    require_once( ABSPATH . 'wp-admin/includes/plugin.php' );
-}
-if ( !is_plugin_active( 'rest-api/plugin.php' ) ) {
-    include_once( plugin_dir_path( __FILE__ ) . 'includes/rest-api/plugin.php' );
 }
 
 global $geodir_rest;
