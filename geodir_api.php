@@ -126,6 +126,8 @@ if ( !class_exists('Geodir_REST') ) {
                     include_once( GEODIR_REST_PLUGIN_DIR . 'includes/rest-api/plugin.php' );
                 }
                 
+                require_once( GEODIR_REST_PLUGIN_DIR . 'includes/class-geodir-rest-taxonomies-controller.php' );
+                require_once( GEODIR_REST_PLUGIN_DIR . 'includes/class-geodir-rest-terms-controller.php' );
                 require_once( GEODIR_REST_PLUGIN_DIR . 'includes/class-geodir-rest-listings-controller.php' );
                 require_once( GEODIR_REST_PLUGIN_DIR . 'includes/class-geodir-rest-reviews-controller.php' );
             }
@@ -141,6 +143,7 @@ if ( !class_exists('Geodir_REST') ) {
             if (!empty($gd_post_types)) {
                 foreach ($gd_post_types as $post_type => $data) {
                     if (isset($wp_post_types[$post_type])) {
+                        $wp_post_types[$post_type]->gd_listing = true;
                         $wp_post_types[$post_type]->show_in_rest = true;
                         $wp_post_types[$post_type]->rest_base = $data['has_archive'];
                         $wp_post_types[$post_type]->rest_controller_class = 'Geodir_REST_Listings_Controller';
@@ -148,17 +151,12 @@ if ( !class_exists('Geodir_REST') ) {
                         if (!empty($data['taxonomies'])) {
                             foreach ($data['taxonomies'] as $taxonomy) {
                                 if (isset($wp_taxonomies[$taxonomy])) {
-                                    if ($taxonomy == $post_type . 'category') {
-                                        $rest_base = 'category';
-                                    } else if ($taxonomy == $post_type . '_tags') {
-                                        $rest_base = 'tag';
-                                    } else {
-                                        $rest_base = $taxonomy;
-                                    }
+                                    $rest_base = $taxonomy;
                                     
-                                    //$wp_taxonomies[$taxonomy]->show_in_rest = true;
-                                    //$wp_taxonomies[$taxonomy]->rest_base = $rest_base;
-                                    //$wp_taxonomies[$taxonomy]->rest_controller_class = 'Geodir_REST_Terms_Controller';
+                                    $wp_taxonomies[$taxonomy]->gd_taxonomy = true;
+                                    $wp_taxonomies[$taxonomy]->show_in_rest = true;
+                                    $wp_taxonomies[$taxonomy]->rest_base = $rest_base;
+                                    $wp_taxonomies[$taxonomy]->rest_controller_class = 'Geodir_REST_Terms_Controller';
                                 }
                             }
                         }
@@ -213,6 +211,25 @@ if ( !class_exists('Geodir_REST') ) {
                     $revisions_controller = new WP_REST_Revisions_Controller( $post_type->name );
                     $revisions_controller->register_routes();
                 }
+            }
+            
+            // GeoDirectory Taxonomies.
+            $controller = new Geodir_REST_Taxonomies_Controller;
+            $controller->register_routes();
+            
+            // Terms.
+            foreach ( get_taxonomies( array( 'show_in_rest' => true, 'gd_taxonomy' => true ), 'object' ) as $taxonomy ) {
+                $class = ! empty( $taxonomy->rest_controller_class ) ? $taxonomy->rest_controller_class : 'WP_REST_Terms_Controller';
+
+                if ( ! class_exists( $class ) ) {
+                    continue;
+                }
+                $controller = new $class( $taxonomy->name );
+                if ( ! ( is_subclass_of( $controller, 'Geodir_REST_Terms_Controller' ) || is_subclass_of( $controller, 'WP_REST_Terms_Controller' ) ) ) {
+                    continue;
+                }
+
+                $controller->register_routes();
             }
 
             $controller = new Geodir_REST_Reviews_Controller;
