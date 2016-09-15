@@ -195,4 +195,103 @@ class Geodir_REST_Listings_Controller extends WP_REST_Posts_Controller {
         }
         return $params;
     }
+    
+    	/**
+	 * Prepare links for the request.
+	 *
+	 * @param WP_Post $post Post object.
+	 * @return array Links for the given post.
+	 */
+	protected function prepare_links( $post ) {
+		$base = sprintf( '/%s/%s', $this->namespace, $this->rest_base );
+
+		// Entity meta
+		$links = array(
+			'self' => array(
+				'href'   => rest_url( trailingslashit( $base ) . $post->ID ),
+			),
+			'collection' => array(
+				'href'   => rest_url( $base ),
+			),
+			'about'      => array(
+				'href'   => rest_url( '/wp/v2/types/' . $this->post_type ),
+			),
+		);
+
+		if ( ( in_array( $post->post_type, array( 'post', 'page' ) ) || post_type_supports( $post->post_type, 'author' ) )
+			&& ! empty( $post->post_author ) ) {
+			$links['author'] = array(
+				'href'       => rest_url( '/wp/v2/users/' . $post->post_author ),
+				'embeddable' => true,
+			);
+		};
+
+		if ( in_array( $post->post_type, array( 'post', 'page' ) ) || post_type_supports( $post->post_type, 'comments' ) ) {
+			$replies_url = rest_url( '/wp/v2/comments' );
+			$replies_url = add_query_arg( 'post', $post->ID, $replies_url );
+			$links['replies'] = array(
+				'href'         => $replies_url,
+				'embeddable'   => true,
+			);
+		}
+
+		if ( in_array( $post->post_type, array( 'post', 'page' ) ) || post_type_supports( $post->post_type, 'revisions' ) ) {
+			$links['version-history'] = array(
+				'href' => rest_url( trailingslashit( $base ) . $post->ID . '/revisions' ),
+			);
+		}
+		$post_type_obj = get_post_type_object( $post->post_type );
+		if ( $post_type_obj->hierarchical && ! empty( $post->post_parent ) ) {
+			$links['up'] = array(
+				'href'       => rest_url( trailingslashit( $base ) . (int) $post->post_parent ),
+				'embeddable' => true,
+			);
+		}
+
+		// If we have a featured media, add that.
+		if ( $featured_media = get_post_thumbnail_id( $post->ID ) ) {
+			$image_url = rest_url( 'wp/v2/media/' . $featured_media );
+			$links['https://api.w.org/featuredmedia'] = array(
+				'href'       => $image_url,
+				'embeddable' => true,
+			);
+		}
+		if ( ! in_array( $post->post_type, array( 'attachment', 'nav_menu_item', 'revision' ) ) ) {
+			$attachments_url = rest_url( 'wp/v2/media' );
+			$attachments_url = add_query_arg( 'parent', $post->ID, $attachments_url );
+			$links['https://api.w.org/attachment'] = array(
+				'href'       => $attachments_url,
+			);
+		}
+
+        $taxonomies_controller = new Geodir_REST_Taxonomies_Controller;
+        
+		$taxonomies = get_object_taxonomies( $post->post_type );
+		if ( ! empty( $taxonomies ) ) {
+			$links['https://api.w.org/term'] = array();
+
+			foreach ( $taxonomies as $tax ) {
+				$taxonomy_obj = get_taxonomy( $tax );
+				// Skip taxonomies that are not public.
+				if ( empty( $taxonomy_obj->show_in_rest ) ) {
+					continue;
+				}
+
+				$tax_base = ! empty( $taxonomy_obj->rest_base ) ? $taxonomy_obj->rest_base : $tax;
+				$terms_url = add_query_arg(
+					'post',
+					$post->ID,
+					rest_url( $this->namespace . '/' . $tax_base )
+				);
+
+				$links['https://api.w.org/term'][] = array(
+					'href'       => $terms_url,
+					'taxonomy'   => $tax,
+					'embeddable' => true,
+				);
+			}
+		}
+
+		return $links;
+	}
 }
