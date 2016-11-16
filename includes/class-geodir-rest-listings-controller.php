@@ -1,6 +1,7 @@
 <?php
 
 class Geodir_REST_Listings_Controller extends WP_REST_Posts_Controller {
+    
     protected $post_type;
 
     public function __construct( $post_type ) {
@@ -8,12 +9,15 @@ class Geodir_REST_Listings_Controller extends WP_REST_Posts_Controller {
         $this->namespace    = GEODIR_REST_SLUG . '/v' . GEODIR_REST_API_VERSION;
         $obj                = get_post_type_object( $post_type );
         $this->rest_base    = ! empty( $obj->rest_base ) ? $obj->rest_base : $obj->name;
+        
+        $this->meta         = new WP_REST_Post_Meta_Fields( $this->post_type );
     }
 
     /**
      * Register the routes for the objects of the controller.
      */
     public function register_routes() {
+        
         register_rest_route( $this->namespace, '/' . $this->rest_base, array(
             array(
                 'methods'         => WP_REST_Server::READABLE,
@@ -35,7 +39,10 @@ class Geodir_REST_Listings_Controller extends WP_REST_Posts_Controller {
                 'callback'        => array( $this, 'get_item' ),
                 'permission_callback' => array( $this, 'get_item_permissions_check' ),
                 'args'            => array(
-                    'context'          => $this->get_context_param( array( 'default' => 'view' ) ),
+                    'context'  => $this->get_context_param( array( 'default' => 'view' ) ),
+                    'password' => array(
+                        'description' => __( 'The password for the post if it is password protected.' ),
+                    ),
                 ),
             ),
             array(

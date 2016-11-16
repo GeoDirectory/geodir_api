@@ -13,6 +13,8 @@ class Geodir_REST_Terms_Controller extends WP_REST_Terms_Controller {
 		$this->namespace    = GEODIR_REST_SLUG . '/v' . GEODIR_REST_API_VERSION;
 		$tax_obj            = get_taxonomy( $taxonomy );
 		$this->rest_base    = ! empty( $tax_obj->rest_base ) ? $tax_obj->rest_base : $tax_obj->name;
+		
+		$this->meta = new WP_REST_Term_Meta_Fields( $taxonomy );
 	}
 
 	/**
@@ -368,12 +370,23 @@ class Geodir_REST_Terms_Controller extends WP_REST_Terms_Controller {
 		 */
 		do_action( "rest_insert_{$this->taxonomy}", $term, $request, true );
 
-		$this->update_additional_fields_for_object( $term, $request );
+		if ( ! empty( $schema['properties']['meta'] ) && isset( $request['meta'] ) ) {
+			$meta_update = $this->meta->update_value( $request['meta'], (int) $request['id'] );
+			if ( is_wp_error( $meta_update ) ) {
+				return $meta_update;
+			}
+		}
+
+		$fields_update = $this->update_additional_fields_for_object( $term, $request );
+		if ( is_wp_error( $fields_update ) ) {
+			return $fields_update;
+		}
+
 		$request->set_param( 'context', 'view' );
 		$response = $this->prepare_item_for_response( $term, $request );
 		$response = rest_ensure_response( $response );
 		$response->set_status( 201 );
-		$response->header( 'Location', rest_url( '/' . $this->namespace . '/' . $this->rest_base . '/' . $term->term_id ) );
+		$response->header( 'Location', rest_url( $this->namespace . '/' . $this->rest_base . '/' . $term->term_id ) );
 		return $response;
 	}
 
@@ -438,7 +451,19 @@ class Geodir_REST_Terms_Controller extends WP_REST_Terms_Controller {
 		/* This action is documented in lib/endpoints/class-wp-rest-terms-controller.php */
 		do_action( "rest_insert_{$this->taxonomy}", $term, $request, false );
 
-		$this->update_additional_fields_for_object( $term, $request );
+		$schema = $this->get_item_schema();
+		if ( ! empty( $schema['properties']['meta'] ) && isset( $request['meta'] ) ) {
+			$meta_update = $this->meta->update_value( $request['meta'], (int) $request['id'] );
+			if ( is_wp_error( $meta_update ) ) {
+				return $meta_update;
+			}
+		}
+
+		$fields_update = $this->update_additional_fields_for_object( $term, $request );
+		if ( is_wp_error( $fields_update ) ) {
+			return $fields_update;
+		}
+
 		$request->set_param( 'context', 'view' );
 		$response = $this->prepare_item_for_response( $term, $request );
 		return rest_ensure_response( $response );
@@ -694,7 +719,7 @@ class Geodir_REST_Terms_Controller extends WP_REST_Terms_Controller {
 					'type'         => 'string',
 					'context'      => array( 'view', 'embed', 'edit' ),
 					'arg_options'  => array(
-						'sanitize_callback' => 'sanitize_title',
+						'sanitize_callback' => array( $this, 'sanitize_slug' ),
 					),
 				),
 				'taxonomy'         => array(
