@@ -1,6 +1,7 @@
 v0.0.2
 Fail to get reviews when review rating addon not installed - FIXED
 Taxonomies endpoints added to retrieve GeoDirectory taxonomies - ADDED
+WP REST API 2.0 Beta 15.0 compatibility issue fixed - FIXED
 
 v0.0.1
 Alpha release.
