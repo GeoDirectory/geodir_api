@@ -177,11 +177,17 @@ function geodir_rest_register_cpt_fields() {
 
     if (!empty($gd_post_types)) {
         foreach ($gd_post_types as $post_type => $data) {
-            geodir_rest_register_gd_data($post_type);
+            add_filter('rest_prepare_' . $post_type, 'geodir_rest_prepare_post_type_response', 10, 3);
         }
     }
 }
-add_action('rest_api_init', 'geodir_rest_register_cpt_fields');
+add_action('init', 'geodir_rest_register_cpt_fields');
+
+function geodir_rest_prepare_post_type_response($response, $post, $request) {
+    $response->gd_data = geodir_rest_get_gd_data($post->ID);
+    
+    return $response;
+}
 
 function geodir_rest_register_gd_data($post_type) {
     register_api_field($post_type,
@@ -194,9 +200,8 @@ function geodir_rest_register_gd_data($post_type) {
     );
 }
 
-function geodir_rest_get_gd_data($object, $attribute, $args) {
-    $post_id = $object['id'];
-    $post_type = $object['type'];
+function geodir_rest_get_gd_data($post_id) {
+    $post_type = get_post_type($post_id);
 
     $custom_fields = geodir_rest_get_custom_fields($post_type, true, 'htmlvar_name');
     $taxonomy = $post_type . 'category';
@@ -627,7 +632,13 @@ function geodir_rest_get_comment( $comment ) {
     $query = "SELECT gdr.`id` AS review_id, gdr.`post_title`, gdr.`post_type`, gdr.`rating_ip`, gdr.`ratings`, gdr.`overall_rating`, gdr.`comment_images`, gdr.`wasthis_review`, gdr.`status` AS review_status, gdr.`post_status` AS review_post_status, gdr.`post_date`, gdr.`post_city` AS city, gdr.`post_region` AS region, gdr.`post_country` AS country, gdr.`post_latitude` AS latitude, gdr.`post_longitude` AS longitude, gdr.`comment_content` AS review " . $fields . " FROM " . GEODIR_REVIEW_TABLE . " AS gdr WHERE gdr.comment_id = " . (int)$comment->comment_ID;
     $review = $wpdb->get_row( $query );
     
-    $comment = (object)array_merge((array)$comment, (array)$review);
+    if (!empty($review)) {
+        foreach ($review as $field => $value) {
+            if (!isset($comment->{$field})) {
+                $comment->{$field} = $value;
+            }
+        }
+    }
     
     return $comment;
 }

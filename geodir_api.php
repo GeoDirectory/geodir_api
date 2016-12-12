@@ -122,10 +122,6 @@ if ( !class_exists('Geodir_REST') ) {
                     require_once( ABSPATH . 'wp-admin/includes/plugin.php' );
                 }
                 
-                if ( !is_plugin_active( 'rest-api/plugin.php' ) ) {
-                    include_once( GEODIR_REST_PLUGIN_DIR . 'includes/rest-api/plugin.php' );
-                }
-                
                 require_once( GEODIR_REST_PLUGIN_DIR . 'includes/class-geodir-rest-taxonomies-controller.php' );
                 require_once( GEODIR_REST_PLUGIN_DIR . 'includes/class-geodir-rest-terms-controller.php' );
                 require_once( GEODIR_REST_PLUGIN_DIR . 'includes/class-geodir-rest-listings-controller.php' );
