@@ -57,6 +57,15 @@ if ( !class_exists('Geodir_REST') ) {
             
             /* Perform actions on admin initialization. */
             if ( is_admin() ) {
+                global $wp_version;
+
+                if ( version_compare( $wp_version, '4.7', '<' ) ) {
+                    if ( is_plugin_active( 'geodir_api/geodir_api.php' ) ) {
+                        deactivate_plugins( 'geodir_api/geodir_api.php' );
+                        add_action( 'admin_notices', array( $this, 'wp_version_notice' ) );
+                    }
+                }
+                
                 add_action( 'admin_init', array( &$this, 'admin_init') );
             }
             add_action( 'init', array( &$this, 'init' ), 3 );
@@ -70,7 +79,7 @@ if ( !class_exists('Geodir_REST') ) {
             register_deactivation_hook( __FILE__, array( 'Geodir_REST', 'deactivation' ) );
             register_uninstall_hook( __FILE__, array( 'Geodir_REST', 'uninstall' ) );
             
-            add_action( 'rest_api_init' , array( $this , 'setup_geodir_rest' ) );
+            add_action( 'rest_api_init' , array( $this , 'setup_geodir_rest' ), 100 );
             
             /**
              * Fires after the setup of all Geodir_REST actions.
@@ -122,10 +131,11 @@ if ( !class_exists('Geodir_REST') ) {
                     require_once( ABSPATH . 'wp-admin/includes/plugin.php' );
                 }
                 
-                require_once( GEODIR_REST_PLUGIN_DIR . 'includes/class-geodir-rest-taxonomies-controller.php' );
-                require_once( GEODIR_REST_PLUGIN_DIR . 'includes/class-geodir-rest-terms-controller.php' );
-                require_once( GEODIR_REST_PLUGIN_DIR . 'includes/class-geodir-rest-listings-controller.php' );
-                require_once( GEODIR_REST_PLUGIN_DIR . 'includes/class-geodir-rest-reviews-controller.php' );
+                require_once( GEODIR_REST_PLUGIN_DIR . 'includes/endpoints/class-geodir-rest-taxonomies-controller.php' );
+                require_once( GEODIR_REST_PLUGIN_DIR . 'includes/endpoints/class-geodir-rest-terms-controller.php' );
+                require_once( GEODIR_REST_PLUGIN_DIR . 'includes/endpoints/class-geodir-rest-listings-controller.php' );
+                require_once( GEODIR_REST_PLUGIN_DIR . 'includes/endpoints/class-geodir-rest-post-types-controller.php' );
+                require_once( GEODIR_REST_PLUGIN_DIR . 'includes/endpoints/class-geodir-rest-reviews-controller.php' );
             }
             
             include_once( GEODIR_REST_PLUGIN_DIR . 'includes/geodir-rest-functions.php' );
@@ -171,6 +181,12 @@ if ( !class_exists('Geodir_REST') ) {
         public function admin_enqueue_scripts() {
         }
         
+        public function wp_version_notice() {
+            global $wp_version;
+            
+            echo '<div class="error"><p>' . wp_sprintf( __( 'GeoDirectory Rest API requires at least WordPress version 4.7. You are using WordPress version %s. <a href="%s" target="_blank">Update Version</a>.', 'geodir_rest' ), $wp_version, network_admin_url( 'update-core.php' ) ) . '</p></div>';
+        }
+        
         public function setup_geodir_rest() {
             if ( defined( 'REST_REQUEST' ) && REST_REQUEST ) {
                 $this->setup_geodir_rest_endpoints();
@@ -200,17 +216,25 @@ if ( !class_exists('Geodir_REST') ) {
                 if ( ! ( is_subclass_of( $controller, 'WP_REST_Posts_Controller' ) || is_subclass_of( $controller, 'WP_REST_Controller' ) ) ) {
                     continue;
                 }
+                
+                $this->register_fields( $post_type->name );
 
+                /*
                 $controller->register_routes();
 
                 if ( post_type_supports( $post_type->name, 'revisions' ) ) {
                     $revisions_controller = new WP_REST_Revisions_Controller( $post_type->name );
                     $revisions_controller->register_routes();
                 }
+                */
             }
             
             // GeoDirectory Taxonomies.
             $controller = new Geodir_REST_Taxonomies_Controller;
+            $controller->register_routes();
+            
+            // GeoDirectory Post types.
+            $controller = new Geodir_REST_Post_Types_Controller;
             $controller->register_routes();
             
             // Terms.
@@ -230,6 +254,171 @@ if ( !class_exists('Geodir_REST') ) {
 
             $controller = new Geodir_REST_Reviews_Controller;
             $controller->register_routes();
+        }
+        
+        public function register_fields( $post_type ) {
+            register_rest_field( $post_type, 'gd_data', array(
+                'get_callback'    => array( $this, 'rest_prepare_geodir_response' ),
+                'update_callback' => null,
+                'schema'          => array( 'gd_data' => array(
+                                            'description' => __( 'GeoDirectory listing fields data.' ),
+                                            'type'        => 'object',
+                                            'context'     => array( 'view' ),
+                                        )
+                                    ),
+            ));
+        }
+        
+        public function rest_prepare_geodir_response( $post, $field_name, $request, $post_type ) {
+            $post_id = $post['id'];
+            $custom_fields = geodir_rest_get_custom_fields($post_type, true, 'htmlvar_name');
+            $taxonomy = $post_type . 'category';
+
+            $date_format = geodir_default_date_format();
+            $time_format = get_option('time_format');
+            $search_date_format = array('dd','d','DD','mm','m','MM','yy'); // jQuery UI datepicker format
+            $replace_date_format = array('d','j','l','m','n','F','Y'); // PHP date format
+
+            $data = array();
+
+            $gd_post_info = geodir_rest_gd_post_info($post_id);
+            if (!empty($gd_post_info)) {
+                $uploads = wp_upload_dir();
+                
+                foreach ($gd_post_info as $field => $value) {
+                    $field_data = array();
+                    
+                    $raw_value = $value != NULL ? $value : '';
+                    $rendered_value = '';
+                    
+                    if ($field == $taxonomy) {
+                        $values = explode(',', trim($raw_value, ','));
+                        
+                        if (!empty($values)) {
+                            $rendered_value = array();
+                            
+                            foreach ($values as $term_id) {
+                                $term = get_term_by('id', $term_id, $taxonomy);
+                                
+                                if (!empty($term)) {
+                                    $rendered_value[] = $term->name;
+                                }
+                            }
+                        }
+                    } else if ($field == 'default_category') {
+                        if ((int)$raw_value > 0 && $term = get_term_by('id', (int)$raw_value, $taxonomy)) {
+                            $rendered_value = $term->name;
+                        }
+                    } else if ($field == 'featured_image') {
+                        if ($raw_value != '') {
+                            $rendered_value = $uploads['baseurl'] . $raw_value;
+                        }
+                    } else if (in_array($field, $custom_fields)) {
+                        $field_info = geodir_rest_get_field_by_name($field, $post_type);
+                        
+                        if (!empty($field_info)) {
+                            $extra_fields = $field_info->extra_fields != '' ? maybe_unserialize($field_info->extra_fields) : '';
+                            $option_values = $field_info->option_values;
+                            $option_values_arr = $option_values != '' ? geodir_string_values_to_options($option_values) : NULL;
+                            
+                            switch ($field_info->field_type) {
+                                case 'time':
+                                    if ($raw_value != '') {
+                                        $rendered_value = date_i18n($time_format, strtotime($raw_value));
+                                    }
+                                break;
+                                case 'datepicker':
+                                    if ($raw_value != '' && $raw_value != '0000-00-00') {
+                                        $date_format = isset($extra_fields['date_format']) && $extra_fields['date_format'] != '' ? $extra_fields['date_format'] : $date_format;
+                                        $date_format = str_replace($search_date_format, $replace_date_format, $date_format);
+                                        
+                                        $rendered_value = $date_format == 'd/m/Y' ? str_replace('/', '-', $raw_value) : $raw_value; // PHP doesn't work well with dd/mm/yyyy format
+                                        $rendered_value = date_i18n($date_format, strtotime($rendered_value));
+                                    }
+                                break;
+                                case 'radio':
+                                    if ($raw_value == 't' || $raw_value == '1') {
+                                        $rendered_value =  __('Yes', 'geodirectory');
+                                    } else if ($raw_value == 'f' || $raw_value == '0') {
+                                        $rendered_value =  __('No', 'geodirectory');
+                                    }
+                                    
+                                    if (strpos($option_values, '/') !== false && !empty($option_values_arr)) {
+                                        foreach ($option_values_arr as $option_row) {
+                                            $option_label = isset($option_row['label']) ? $option_row['label'] : '';
+                                            $option_value = isset($option_row['value']) ? $option_row['value'] : $option_label;
+                                            
+                                            if ($option_value == $raw_value && $option_label != '') {
+                                                $rendered_value = __($option_label, 'geodirectory');
+                                                break;
+                                            }
+                                        }
+                                    }
+                                break;
+                                case 'checkbox':
+                                    if ((int)$raw_value == 1) {
+                                        $rendered_value = __('Yes', 'geodirectory');
+                                    }
+                                break;
+                                case 'select':
+                                    if ($raw_value != '') {
+                                        if (strpos($option_values, '/') !== false && !empty($option_values_arr)) {
+                                            foreach ($option_values_arr as $option_row) {
+                                                $option_label = isset($option_row['label']) ? $option_row['label'] : '';
+                                                $option_value = isset($option_row['value']) ? $option_row['value'] : $option_label;
+                                                
+                                                if ($option_value == $raw_value && $option_label != '') {
+                                                    $rendered_value = __($option_label, 'geodirectory');
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                    }
+                                break;
+                                case 'multiselect':
+                                    if ($raw_value != '') {
+                                        $raw_value_arr = explode(',', $raw_value);
+                                        
+                                        $raw_values = array();
+                                        if (strpos($option_values, '/') !== false) {
+                                            foreach ($option_values_arr as $option_row) {
+                                                $option_label = isset($option_row['label']) ? $option_row['label'] : '';
+                                                $option_value = isset($option_row['value']) ? $option_row['value'] : $option_label;
+                                                $option_label = $option_label == '' ? $option_value : $option_label;
+                                                
+                                                if (in_array($option_value, $raw_value_arr) && $option_label != '') {
+                                                    $raw_values[] = $option_label;
+                                                }
+                                            }
+                                        } else {
+                                            $raw_values = $raw_value_arr;
+                                        }
+                                        
+                                        $rendered_value = array();
+                                        foreach ($raw_values as $label) {
+                                            $rendered_value[] = __($label, 'geodirectory');
+                                        }
+                                    }
+                                break;
+                            }
+                        }
+                    }
+                    
+                    $field_data = $raw_value;
+                    
+                    if (!empty($rendered_value) && $rendered_value != $raw_value) {
+                        $field_data = array();
+                        $field_data['raw'] = $raw_value;
+                        $field_data['rendered'] = $rendered_value;
+                    }
+                    
+                    $data[$field] = $field_data;
+                }
+
+                $data = apply_filters('geodir_rest_get_gd_data', $data, $post_id);
+            }
+
+            return $data;
         }
     }
 }

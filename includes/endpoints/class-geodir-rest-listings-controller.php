@@ -334,7 +334,7 @@ class Geodir_REST_Listings_Controller extends WP_REST_Posts_Controller {
 				'href'   => rest_url( $base ),
 			),
 			'about'      => array(
-				'href'   => rest_url( 'wp/v2/types/' . $this->post_type ),
+				'href'   => rest_url( $this->namespace . '/types/' . $this->post_type ),
 			),
 		);
 
@@ -347,7 +347,7 @@ class Geodir_REST_Listings_Controller extends WP_REST_Posts_Controller {
 		}
 
 		if ( in_array( $post->post_type, array( 'post', 'page' ), true ) || post_type_supports( $post->post_type, 'comments' ) ) {
-			$replies_url = rest_url( 'wp/v2/comments' );
+            $replies_url = rest_url( $this->namespace . '/reviews' );
 			$replies_url = add_query_arg( 'post', $post->ID, $replies_url );
 
 			$links['replies'] = array(
