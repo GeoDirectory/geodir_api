@@ -149,6 +149,9 @@ class Geodir_REST_Taxonomies_Controller extends WP_REST_Taxonomies_Controller {
 			'collection'                => array(
 				'href'                  => rest_url( sprintf( '%s/%s', $this->namespace, $this->rest_base ) ),
 			),
+            'about'                     => array(
+                'href'                  => rest_url( sprintf( '%s/%s/%s', $this->namespace, $this->rest_base, $taxonomy->name ) ),
+            ),
 			'https://api.w.org/items'   => array(
 				'href'                  => rest_url( sprintf( '%s/%s', $this->namespace, $base ) ),
 			),

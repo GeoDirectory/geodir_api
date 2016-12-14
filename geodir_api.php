@@ -79,8 +79,7 @@ if ( !class_exists('Geodir_REST') ) {
             register_deactivation_hook( __FILE__, array( 'Geodir_REST', 'deactivation' ) );
             register_uninstall_hook( __FILE__, array( 'Geodir_REST', 'uninstall' ) );
             
-            add_action( 'rest_api_init' , array( $this , 'setup_geodir_rest' ), 100 );
-            
+            add_action( 'rest_api_init', array( $this , 'setup_geodir_rest' ), 100 );
             /**
              * Fires after the setup of all Geodir_REST actions.
              *
@@ -218,15 +217,6 @@ if ( !class_exists('Geodir_REST') ) {
                 }
                 
                 $this->register_fields( $post_type->name );
-
-                /*
-                $controller->register_routes();
-
-                if ( post_type_supports( $post_type->name, 'revisions' ) ) {
-                    $revisions_controller = new WP_REST_Revisions_Controller( $post_type->name );
-                    $revisions_controller->register_routes();
-                }
-                */
             }
             
             // GeoDirectory Taxonomies.
@@ -236,21 +226,6 @@ if ( !class_exists('Geodir_REST') ) {
             // GeoDirectory Post types.
             $controller = new Geodir_REST_Post_Types_Controller;
             $controller->register_routes();
-            
-            // Terms.
-            foreach ( get_taxonomies( array( 'show_in_rest' => true, 'gd_taxonomy' => true ), 'object' ) as $taxonomy ) {
-                $class = ! empty( $taxonomy->rest_controller_class ) ? $taxonomy->rest_controller_class : 'WP_REST_Terms_Controller';
-
-                if ( ! class_exists( $class ) ) {
-                    continue;
-                }
-                $controller = new $class( $taxonomy->name );
-                if ( ! ( is_subclass_of( $controller, 'Geodir_REST_Terms_Controller' ) || is_subclass_of( $controller, 'WP_REST_Terms_Controller' ) ) ) {
-                    continue;
-                }
-
-                $controller->register_routes();
-            }
 
             $controller = new Geodir_REST_Reviews_Controller;
             $controller->register_routes();

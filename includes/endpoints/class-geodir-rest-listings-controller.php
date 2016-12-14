@@ -346,15 +346,15 @@ class Geodir_REST_Listings_Controller extends WP_REST_Posts_Controller {
 			);
 		}
 
-		if ( in_array( $post->post_type, array( 'post', 'page' ), true ) || post_type_supports( $post->post_type, 'comments' ) ) {
-            $replies_url = rest_url( $this->namespace . '/reviews' );
-			$replies_url = add_query_arg( 'post', $post->ID, $replies_url );
+        if ( in_array( $post->post_type, array( 'post', 'page' ), true ) || post_type_supports( $post->post_type, 'comments' ) ) {
+            $reviews_url = rest_url( $this->namespace . '/reviews' );
+            $reviews_url = add_query_arg( 'post', $post->ID, $reviews_url );
 
-			$links['replies'] = array(
-				'href'       => $replies_url,
-				'embeddable' => true,
-			);
-		}
+            $links['reviews'] = array(
+                'href'       => $reviews_url,
+                'embeddable' => true,
+            );
+        }
 
 		if ( in_array( $post->post_type, array( 'post', 'page' ), true ) || post_type_supports( $post->post_type, 'revisions' ) ) {
 			$links['version-history'] = array(
@@ -420,5 +420,177 @@ class Geodir_REST_Listings_Controller extends WP_REST_Posts_Controller {
 		}
 
 		return $links;
+	}
+    
+	/**
+	 * Creates a single post.
+	 *
+	 * @access public
+	 *
+	 * @param WP_REST_Request $request Full details about the request.
+	 * @return WP_REST_Response|WP_Error Response object on success, or WP_Error object on failure.
+	 */
+	public function create_item( $request ) {
+		if ( ! empty( $request['id'] ) ) {
+			return new WP_Error( 'rest_post_exists', __( 'Cannot create existing post.' ), array( 'status' => 400 ) );
+		}
+
+		$prepared_post = $this->prepare_item_for_database( $request );
+
+		if ( is_wp_error( $prepared_post ) ) {
+			return $prepared_post;
+		}
+
+		$prepared_post->post_type = $this->post_type;
+
+		$post_id = wp_insert_post( wp_slash( (array) $prepared_post ), true );
+        
+        if ( !is_wp_error( $post_id ) ) {
+            $gd_post = $this->prepare_item_for_geodir_database( $request, $post_id );
+            //gddev_log( $gd_request, 'gd_request', __FILE__, __LINE__ );
+            $post_id = geodir_save_listing( $gd_post, null, true );
+            //gddev_log( $post_id, 'post_id', __FILE__, __LINE__ );
+        }
+
+		if ( is_wp_error( $post_id ) ) {
+
+			if ( 'db_insert_error' === $post_id->get_error_code() ) {
+				$post_id->add_data( array( 'status' => 500 ) );
+			} else {
+				$post_id->add_data( array( 'status' => 400 ) );
+			}
+
+			return $post_id;
+		}
+
+		$post = get_post( $post_id );
+
+		/**
+		 * Fires after a single post is created or updated via the REST API.
+		 *
+		 * The dynamic portion of the hook name, `$this->post_type`, refers to the post type slug.
+		 *
+		 * @param WP_Post         $post     Inserted or updated post object.
+		 * @param WP_REST_Request $request  Request object.
+		 * @param bool            $creating True when creating a post, false when updating.
+		 */
+		do_action( "rest_insert_{$this->post_type}", $post, $request, true );
+
+		$schema = $this->get_item_schema();
+
+		if ( ! empty( $schema['properties']['sticky'] ) ) {
+			if ( ! empty( $request['sticky'] ) ) {
+				stick_post( $post_id );
+			} else {
+				unstick_post( $post_id );
+			}
+		}
+
+		if ( ! empty( $schema['properties']['featured_media'] ) && isset( $request['featured_media'] ) ) {
+			$this->handle_featured_media( $request['featured_media'], $post_id );
+		}
+
+		if ( ! empty( $schema['properties']['format'] ) && ! empty( $request['format'] ) ) {
+			set_post_format( $post, $request['format'] );
+		}
+
+		if ( ! empty( $schema['properties']['template'] ) && isset( $request['template'] ) ) {
+			$this->handle_template( $request['template'], $post_id );
+		}
+
+		$terms_update = $this->handle_terms( $post_id, $request );
+
+		if ( is_wp_error( $terms_update ) ) {
+			return $terms_update;
+		}
+
+		if ( ! empty( $schema['properties']['meta'] ) && isset( $request['meta'] ) ) {
+			$meta_update = $this->meta->update_value( $request['meta'], $post_id );
+
+			if ( is_wp_error( $meta_update ) ) {
+				return $meta_update;
+			}
+		}
+
+		$post = get_post( $post_id );
+		$fields_update = $this->update_additional_fields_for_object( $post, $request );
+
+		if ( is_wp_error( $fields_update ) ) {
+			return $fields_update;
+		}
+
+		$request->set_param( 'context', 'edit' );
+
+		$response = $this->prepare_item_for_response( $post, $request );
+		$response = rest_ensure_response( $response );
+
+		$response->set_status( 201 );
+		$response->header( 'Location', rest_url( sprintf( '%s/%s/%d', $this->namespace, $this->rest_base, $post_id ) ) );
+
+		return $response;
+	}
+    
+	/**
+	 * Prepares a single post for create or update.
+	 *
+	 * @access protected
+	 *
+	 * @param WP_REST_Request $request Request object.
+	 * @return stdClass|WP_Error Post object or WP_Error.
+	 */
+	protected function prepare_item_for_geodir_database( $request, $post_id = 0 ) {
+        $prepared_post = $request->get_params();
+        //gddev_log( $prepared_post, 'prepared_post', __FILE__, __LINE__ );
+        // Post ID.
+        if ( isset( $request['id'] ) ) {
+            $prepared_post['post_id'] = absint( $request['id'] );
+        }
+        
+        $prepared_post['listing_type'] = $this->post_type;
+        
+        $schema = $this->get_item_schema();
+
+        // Post title.
+        if ( ! empty( $schema['properties']['title'] ) && isset( $request['title'] ) ) {
+            if ( is_string( $request['title'] ) ) {
+                $prepared_post['post_title'] = $request['title'];
+            } elseif ( ! empty( $request['title']['raw'] ) ) {
+                $prepared_post['post_title'] = $request['title']['raw'];
+            }
+        }
+
+        // Post content.
+        if ( ! empty( $schema['properties']['content'] ) && isset( $request['content'] ) ) {
+            if ( is_string( $request['content'] ) ) {
+                $prepared_post['content'] = $request['content'];
+            } elseif ( isset( $request['content']['raw'] ) ) {
+                $prepared_post['content'] = $request['content']['raw'];
+            }
+        }
+
+        //gddev_log( $prepared_post, 'prepared_post', __FILE__, __LINE__ );
+        /**
+         * Filters a post before it is inserted via the REST API.
+         *
+         * The dynamic portion of the hook name, `$this->post_type`, refers to the post type slug.
+         *
+         *
+         * @param array        $prepared_post An object representing a single post prepared
+         *                                       for inserting or updating the database.
+         * @param WP_REST_Request $request       Request object.
+         */
+        $prepared_post = apply_filters( "geodir_rest_pre_insert_{$this->post_type}", $prepared_post, $request );
+
+        /**
+         * Filters a post before it is inserted via the REST API.
+         *
+         * The dynamic portion of the hook name, `$this->post_type`, refers to the post type slug.
+         *
+         *
+         * @param array        $prepared_post An object representing a single post prepared
+         *                                       for inserting or updating the database.
+         * @param WP_REST_Request $request       Request object.
+         */
+        return apply_filters( "geodir_rest_pre_insert_listing", $prepared_post, $this->post_type, $request );
 	}
 }
