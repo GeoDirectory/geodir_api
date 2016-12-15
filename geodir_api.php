@@ -79,6 +79,7 @@ if ( !class_exists('Geodir_REST') ) {
             register_deactivation_hook( __FILE__, array( 'Geodir_REST', 'deactivation' ) );
             register_uninstall_hook( __FILE__, array( 'Geodir_REST', 'uninstall' ) );
             
+            add_action( 'rest_api_init', array( $this , 'geodir_register_fields' ) );
             add_action( 'rest_api_init', array( $this , 'setup_geodir_rest' ), 100 );
             /**
              * Fires after the setup of all Geodir_REST actions.
@@ -242,6 +243,23 @@ if ( !class_exists('Geodir_REST') ) {
                                         )
                                     ),
             ));
+        }
+        
+        public function geodir_register_fields() {            
+            $gd_post_types = geodir_get_posttypes();
+
+            foreach ( $gd_post_types as $post_type ) {
+                $geodir_schema = geodir_get_item_schema( $post_type );
+        
+                foreach ( $geodir_schema as $name => $schema ) {
+                    $args = array();
+                    //$args['get_callback']      = 'geodir_rest_field_get_callback';
+                    //$args['update_callback']   = 'geodir_rest_field_update_callback';
+                    $args['schema']            = $schema;
+                                
+                    register_rest_field( $post_type, $name, $args );
+                }
+            }
         }
         
         public function rest_prepare_geodir_response( $post, $field_name, $request, $post_type ) {

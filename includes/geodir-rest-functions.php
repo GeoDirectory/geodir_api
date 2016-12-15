@@ -526,3 +526,58 @@ function geodir_rest_get_review_sorting() {
                    
     return apply_filters( 'geodir_reviews_rating_comment_shorting', $sorting );
 }
+
+function geodir_get_item_schema( $post_type ) {
+    $package_id     = '';
+    $default        = 'all';
+    $custom_fields  = geodir_post_custom_fields( $package_id, $default, $post_type );
+    
+    $geodir_schema = array();
+    
+    foreach ( $custom_fields as $id => $field ) {
+        $args           = array();
+        
+        $name           = $field['htmlvar_name'];
+        $field_type     = $field['field_type'];
+        $title          = $field['site_title'] ? $field['site_title'] : $field['admin_title'];
+        $description    = $field['desc'];
+        $required       = $field['is_required'];
+        $default        = $field['default'];
+        $options        = $field['options'];
+        
+        $args['title']         = __( $title, 'geodirectory' );
+        $args['description']   = __( $description, 'geodirectory' );
+        
+        $continue = false;
+        
+        switch ( $field_type ) {
+            case 'text':
+                $args['type']       = 'text';
+                $args['context']    = array( 'view', 'edit' );
+            break;
+            case 'multiselect':
+                $args['type']       = 'text';
+                $args['context']    = array( 'view', 'edit' );
+                $args['enum']       = $options;
+                $args['items']      = array( 'type' => '' );
+            break;
+            default:
+                $continue = true;
+            break;
+        }
+        
+        if ( $continue ) {
+            continue;
+        }
+        
+        $args['required']      = (bool)$required;
+        $args['default']       = $default;
+        
+        $geodir_schema[ $name ] = $args;
+    }
+    
+    //gddev_log( $geodir_schema, 'geodir_schema', __FILE__, __LINE__ );
+    //gddev_log( $custom_fields, 'custom_fields', __FILE__, __LINE__ );
+    
+    return $geodir_schema;
+}

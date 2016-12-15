@@ -42,6 +42,9 @@ class Geodir_REST_Listings_Controller extends WP_REST_Posts_Controller {
         $this->rest_base    = ! empty( $obj->rest_base ) ? $obj->rest_base : $obj->name;
         
         $this->meta         = new WP_REST_Post_Meta_Fields( $this->post_type );
+        
+        $this->cat_taxonomy = $this->post_type . 'category';
+        $this->tag_taxonomy = $this->post_type . '_tags';
     }
 
 	/**
@@ -447,7 +450,7 @@ class Geodir_REST_Listings_Controller extends WP_REST_Posts_Controller {
         
         if ( !is_wp_error( $post_id ) ) {
             $gd_post = $this->prepare_item_for_geodir_database( $request, $post_id );
-            //gddev_log( $gd_request, 'gd_request', __FILE__, __LINE__ );
+            //gddev_log( $gd_post, 'gd_post', __FILE__, __LINE__ );
             $post_id = geodir_save_listing( $gd_post, null, true );
             //gddev_log( $post_id, 'post_id', __FILE__, __LINE__ );
         }
@@ -541,12 +544,11 @@ class Geodir_REST_Listings_Controller extends WP_REST_Posts_Controller {
 	protected function prepare_item_for_geodir_database( $request, $post_id = 0 ) {
         $prepared_post = $request->get_params();
         //gddev_log( $prepared_post, 'prepared_post', __FILE__, __LINE__ );
+        
         // Post ID.
         if ( isset( $request['id'] ) ) {
             $prepared_post['post_id'] = absint( $request['id'] );
         }
-        
-        $prepared_post['listing_type'] = $this->post_type;
         
         $schema = $this->get_item_schema();
 
@@ -566,6 +568,19 @@ class Geodir_REST_Listings_Controller extends WP_REST_Posts_Controller {
             } elseif ( isset( $request['content']['raw'] ) ) {
                 $prepared_post['content'] = $request['content']['raw'];
             }
+        }
+        
+        // Post category.
+        if ( isset( $request[ $this->cat_taxonomy ] ) ) {
+            if ( empty( $request[ $this->cat_taxonomy ] ) ) {
+                $post_category = '';
+            } elseif ( is_array( $request[ $this->cat_taxonomy ] ) ) {
+                $post_category = implode( ',', $request[ $this->cat_taxonomy ] );
+            } else {
+                $post_category = $request[ $this->cat_taxonomy ];
+            }
+            
+            $prepared_post['post_category'][ $this->cat_taxonomy ] = $post_category;
         }
 
         //gddev_log( $prepared_post, 'prepared_post', __FILE__, __LINE__ );
