@@ -193,6 +193,8 @@ if ( !class_exists('Geodir_REST') ) {
                 
                 add_filter( 'comments_clauses', 'geodir_rest_comments_clauses', 10, 2 );
                 add_filter( 'get_comment', 'geodir_rest_get_comment', 10, 1 );
+                
+                add_action( 'rest_insert_comment', array( $this, 'save_review' ), 10, 3 );
             }
         }
         
@@ -246,19 +248,27 @@ if ( !class_exists('Geodir_REST') ) {
         }
         
         public function geodir_register_fields() {            
+             global $wp_post_types;
+             
             $gd_post_types = geodir_get_posttypes();
 
-            foreach ( $gd_post_types as $post_type ) {
-                $geodir_schema = geodir_get_item_schema( $post_type );
-        
-                foreach ( $geodir_schema as $name => $schema ) {
-                    $args = array();
-                    //$args['get_callback']      = 'geodir_rest_field_get_callback';
-                    //$args['update_callback']   = 'geodir_rest_field_update_callback';
-                    $args['schema']            = $schema;
-                                
-                    register_rest_field( $post_type, $name, $args );
+            foreach ( $wp_post_types as $post_type ) {
+                if ( !( in_array( $post_type->name, $gd_post_types ) && !empty( $post_type->show_in_rest ) ) ) {
+                    continue;
                 }
+
+                $class = ! empty( $post_type->rest_controller_class ) ? $post_type->rest_controller_class : 'WP_REST_Posts_Controller';
+
+                if ( ! class_exists( $class ) ) {
+                    continue;
+                }
+                $controller = new $class( $post_type->name );
+
+                if ( ! ( is_subclass_of( $controller, 'WP_REST_Posts_Controller' ) || is_subclass_of( $controller, 'WP_REST_Controller' ) ) ) {
+                    continue;
+                }
+                
+                $controller->register_listing_fields();
             }
         }
         
@@ -412,6 +422,22 @@ if ( !class_exists('Geodir_REST') ) {
             }
 
             return $data;
+        }
+        
+        public function save_review( $comment, $request, $new = false ) {
+            ob_start();
+            
+            if ( geodir_rest_is_active( 'reviewrating' ) ) {
+                if ( !empty( $request['rating'] ) ) {
+                    $_REQUEST['geodir_rating'] = $request['rating'] ;
+                
+                    geodir_reviewrating_save_rating( $comment->comment_ID );
+                }
+            } else {
+                geodir_save_rating();
+            }
+            
+            ob_get_clean();
         }
     }
 }
