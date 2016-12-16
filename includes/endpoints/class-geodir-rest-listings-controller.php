@@ -608,4 +608,321 @@ class Geodir_REST_Listings_Controller extends WP_REST_Posts_Controller {
          */
         return apply_filters( "geodir_rest_pre_insert_listing", $prepared_post, $this->post_type, $request );
 	}
+    
+    public function register_listing_fields() {
+        $listing_schema = $this->geodir_get_item_schema();
+        
+        foreach ( $listing_schema as $name => $schema ) {
+            $args = array();
+            //$args['get_callback']      = array( $this, 'geodir_get_callback' );
+            //$args['update_callback']   = array( $this, 'geodir_update_callback' );
+            $args['schema']            = $schema;
+            
+            register_rest_field( $this->post_type, $name, $args );
+        }
+    }
+    
+    public function geodir_get_item_schema( $package_id = '', $default = 'all' ) {
+        $custom_fields  = geodir_post_custom_fields( $package_id, $default, $this->post_type );
+        
+        $schema = array();
+        
+        foreach ( $custom_fields as $id => $field ) {
+            $admin_use              = (bool)$field['for_admin_use'];
+            
+            if ( $admin_use ) {
+                continue;
+            }
+            
+            $name                   = $field['htmlvar_name'];
+            $data_type              = $field['data_type'];
+            $field_type             = $field['field_type'];
+            $title                  = $field['site_title'] ? stripslashes( __( $field['site_title'], 'geodirectory' ) ) : stripslashes( __( $field['admin_title'], 'geodirectory' ) );
+            $description            = stripslashes( __( $field['desc'], 'geodirectory' ) );
+            $required               = $field['is_required'];
+            $default                = $field['default'];
+            $extra_fields           = !empty( $field['extra_fields'] ) ? stripslashes_deep( maybe_unserialize( $field['extra_fields'] ) ) : NULL;
+            $options                = !empty( $field['option_values'] ) ? stripslashes_deep( $field['options'] ) : array();
+            $rendered_options       = !empty( $field['option_values'] ) ? stripslashes_deep( geodir_string_values_to_options( $field['option_values'], true ) ) : array();
+            $enum                   = $rendered_options ? geodir_rest_get_enum_values( $rendered_options ) : array();
+            $prefix                 = '';
+            
+            $args                   = array();
+            $args['type']           = 'string';
+            $args['context']        = array( 'view', 'edit' );
+            $args['title']          = $title;
+            $args['description']    = $description;
+            $args['required']       = (bool)$required;
+            $args['default']        = $default;
+            
+            $continue = false;
+            
+            switch ( $field_type ) {
+                case 'address':
+                    $prefix     = $name . '_';
+                    $name       = 'address';
+                    $location   = geodir_get_default_location();
+                    $country    = !empty( $location->country ) ? $location->country : '';
+                    $region     = !empty( $location->region ) ? $location->region : '';
+                    $city       = !empty( $location->city ) ? $location->city : '';
+                    $latitude   = !empty( $location->city_latitude ) ? $location->city_latitude : '';
+                    $longitude  = !empty( $location->city_longitude ) ? $location->city_longitude : '';
+                    
+                    $schema[ $prefix . $name ]    = $args;
+                    
+                    $schema[ $prefix . 'country' ] = array(
+                        'type'          => 'string',
+                        'context'       => array( 'view', 'edit' ),
+                        'title'         => __( 'Country', 'geodirectory' ),
+                        'description'   => __( 'Choose a country', 'geodirectory' ),
+                        'required'      => (bool)$required,
+                        'default'       => $country,
+                    );
+                    
+                    $schema[ $prefix . 'region' ] = array(
+                        'type'          => 'string',
+                        'context'       => array( 'view', 'edit' ),
+                        'title'         => __( 'Region', 'geodirectory' ),
+                        'description'   => __( 'Choose a region', 'geodirectory' ),
+                        'required'      => (bool)$required,
+                        'default'       => $region,
+                    );
+                    
+                    $schema[ $prefix . 'city' ] = array(
+                        'type'          => 'string',
+                        'context'       => array( 'view', 'edit' ),
+                        'title'         => __( 'City', 'geodirectory' ),
+                        'description'   => __( 'Choose a city', 'geodirectory' ),
+                        'required'      => (bool)$required,
+                        'default'       => $city,
+                    );
+                    
+                    if ( geodir_rest_is_active( 'neighbourhood' ) ) {
+                        $schema[ $prefix . 'neighbourhood' ] = array(
+                            'type'          => 'string',
+                            'context'       => array( 'view', 'edit' ),
+                            'title'         => __( 'Neighbourhood', 'geodirectory' ),
+                            'description'   => __( 'Choose a neighbourhood', 'geodirectory' ),
+                            'required'      => (bool)$required,
+                        );
+                    }
+                    
+                    if ( !empty( $extra_fields['show_zip'] ) ) {
+                        $schema[ $prefix . 'zip' ] = array(
+                            'type'          => 'string',
+                            'context'       => array( 'view', 'edit' ),
+                            'title'         => !empty( $extra_fields['zip_lable'] ) ? __( $extra_fields['zip_lable'], 'geodirectory' ) : __( 'Zip/Post Code', 'geodirectory' ),
+                            'required'      => (bool)$required,
+                        );
+                    }
+                    
+                    if ( !empty( $extra_fields['show_map'] ) ) {
+                        $schema[ $prefix . 'map' ] = array(
+                            'type'          => 'string',
+                            'context'       => array( 'view', 'edit' ),
+                            'title'         => !empty( $extra_fields['map_lable'] ) ? __( $extra_fields['map_lable'], 'geodirectory' ) : __( 'Map', 'geodirectory' ),
+                            'description'   => __( 'Click on "Set Address on Map" and then you can also drag pinpoint to locate the correct address', 'geodirectory' ),
+                            'readonly'      => true,
+                        );
+                        
+                        $schema[ $prefix . 'latitude' ] = array(
+                            'type'          => 'string',
+                            'context'       => array( 'view', 'edit' ),
+                            'title'         => __( 'Address Latitude', 'geodirectory' ),
+                            'description'   => __( 'Please enter latitude for google map perfection. eg. : <b>39.955823048131286</b>', 'geodirectory' ),
+                            'required'      => (bool)$required,
+                            'default'       => $latitude,
+                            'readonly'      => empty( $extra_fields['show_latlng'] ) ? true : false,
+                        );
+                        
+                        $schema[ $prefix . 'longitude' ] = array(
+                            'type'          => 'string',
+                            'context'       => array( 'view', 'edit' ),
+                            'title'         => __( 'Address Longitude', 'geodirectory' ),
+                            'description'   => __( 'Please enter longitude for google map perfection. eg. : <b>-75.14408111572266</b>', 'geodirectory' ),
+                            'required'      => (bool)$required,
+                            'default'       => $longitude,
+                            'readonly'      => empty( $extra_fields['show_latlng'] ) ? true : false,
+                        );
+                    }
+                    
+                    if ( !empty( $extra_fields['show_mapview'] ) ) {
+                        $schema[ $prefix . 'mapview' ] = array(
+                            'type'          => 'string',
+                            'context'       => array( 'view', 'edit' ),
+                            'title'         => !empty( $extra_fields['mapview_lable'] ) ? __( $extra_fields['mapview_lable'], 'geodirectory' ) : __( 'Map View', 'geodirectory' ),
+                            'default'       => 'ROADMAP',
+                            'enum'          => array( 'ROADMAP', 'SATELLITE', 'HYBRID', 'TERRAIN' ),
+                        );
+                    }
+                    
+                    if ( !empty( $extra_fields['show_mapzoom'] ) ) {
+                        $schema[ $prefix . 'mapzoom' ] = array(
+                            'type'          => 'string',
+                            'context'       => array( 'view', 'edit' ),
+                            'title'         => __( 'Map Zoom', 'geodirectory' ),
+                            'readonly'      => true,
+                        );
+                    }
+                    break;
+                case 'checkbox':
+                    $args['type']   = geodir_rest_data_type_to_field_type( $data_type );
+                    break;
+                case 'datepicker':
+                    $args['type']       = 'object';
+                    $args['format']     = 'date-time';
+                    if ( !empty( $extra_fields['date_format'] ) ) {
+                        $args['date_format'] = $extra_fields['date_format'];
+                    }
+                    $args['properties'] = array(
+                        'raw' => array(
+                            'description' => __( 'Date for the object, as it exists in the database.' ),
+                            'type'        => 'string',
+                            'context'     => array( 'view', 'edit' ),
+                        ),
+                        'rendered' => array(
+                            'description' => __( 'Date for the object, transformed for display.' ),
+                            'type'        => 'string',
+                            'context'     => array( 'view', 'edit' ),
+                            'readonly'    => true,
+                        ),
+                    );
+                    break;
+                case 'email':
+                    $args['format'] = 'email';
+                    break;
+                case 'fieldset':
+                    $args['readonly'] = true;
+                    break;
+                case 'file':
+                    $args['type']       = 'object';
+                    $args['properties'] = array(
+                        'raw' => array(
+                            'description' => __( 'File for the object, as it exists in the database.' ),
+                            'type'        => 'string',
+                            'context'     => array( 'view', 'edit' ),
+                        ),
+                        'rendered' => array(
+                            'description' => __( 'File for the object, transformed for display.' ),
+                            'type'        => 'string',
+                            'context'     => array( 'view', 'edit' ),
+                            'readonly'    => true,
+                        ),
+                    );
+                    
+                    if ( !empty( $extra_fields['gd_file_types'] ) ) {
+                        $args['file_types'] = $extra_fields['gd_file_types'];
+                    }
+                    break;
+                case 'html':
+                    $args['type']       = 'object';
+                    $args['properties'] = array(
+                        'raw' => array(
+                            'description' => __( 'Content for the object, as it exists in the database.' ),
+                            'type'        => 'string',
+                            'context'     => array( 'view', 'edit' ),
+                        ),
+                        'rendered' => array(
+                            'description' => __( 'Content for the object, transformed for display.' ),
+                            'type'        => 'string',
+                            'context'     => array( 'view', 'edit' ),
+                            'readonly'    => true,
+                        ),
+                    );
+                    break;
+                case 'multiselect':
+                    $args['type']       = 'object';
+                    $args['enum']       = $enum;
+                    $args['items']      = array( 'type' => 'array' );
+                    $args['properties'] = array(
+                        'raw' => array(
+                            'description' => __( 'Field for the object, as it exists in the database.' ),
+                            'type'        => 'string',
+                            'context'     => array( 'view', 'edit' ),
+                        ),
+                        'rendered' => array(
+                            'description' => __( 'Field for the object, transformed for display.' ),
+                            'type'        => 'string',
+                            'context'     => array( 'view', 'edit' ),
+                            'readonly'    => true,
+                        ),
+                    );
+                    $args['display_type']   = !empty( $extra_fields ) ? $extra_fields : 'select';
+                    break;
+                case 'radio':
+                    $args['type']           = 'object';
+                    $args['enum']           = $enum;
+                    $args['items']          = array( 'type' => 'string' );
+                    break;
+                case 'select':
+                    $args['type']       = 'object';
+                    $args['enum']       = $enum;
+                    $args['items']      = array( 'type' => 'string' );
+                    $args['properties'] = array(
+                        'raw' => array(
+                            'description' => __( 'Field for the object, as it exists in the database.' ),
+                            'type'        => 'string',
+                            'context'     => array( 'view', 'edit' ),
+                        ),
+                        'rendered' => array(
+                            'description' => __( 'Field for the object, transformed for display.' ),
+                            'type'        => 'string',
+                            'context'     => array( 'view', 'edit' ),
+                            'readonly'    => true,
+                        ),
+                    );
+                    break;
+                case 'taxonomy':
+                    if ( $this->cat_taxonomy == $name ) {
+                        $args['type']        = 'array';
+                        $args['items']       = array( 'type' => 'integer' );
+                    }
+                    break;
+                case 'phone':
+                case 'text':
+                    $args['type']   = geodir_rest_data_type_to_field_type( $data_type );
+                    break;
+                case 'textarea':
+                    $args['type']   = 'string';
+                    break;
+                case 'time':
+                    $args['type']   = 'string';
+                    break;
+                case 'url':
+                    $args['format'] = 'uri';
+                    break;
+                default:
+                    $continue = true;
+                    break;
+            }
+            
+            if ( $continue ) {
+                continue;
+            }
+            
+            $args['field_type']     = $field_type;
+            $args['data_type']      = $data_type;
+            $args['extra_fields']   = $extra_fields;
+            if ( !empty( $options ) ) {
+                $args['field_options']   = $options;
+            }
+            if ( !empty( $rendered_options ) ) {
+                $args['rendered_options']   = $rendered_options;
+            }
+            
+            $schema[ $prefix . $name ]    = apply_filters( 'geodir_listing_fields_args', $args, $field );
+        }
+
+        return apply_filters( 'geodir_listing_item_schema', $schema, $this->post_type, $package_id, $default );
+    }
+    
+    public function geodir_get_callback( $object, $field_name, $request, $object_type ) {
+        //gddev_log( $field_name, 'geodir_get_callback()', __FILE__, __LINE__ );
+        return $object;
+    }
+    
+    public function geodir_update_callback( $value, $object, $field_name, $request, $object_type ) {
+        //gddev_log( $field_name, 'geodir_update_callback()', __FILE__, __LINE__ );
+        return true;
+    }
 }

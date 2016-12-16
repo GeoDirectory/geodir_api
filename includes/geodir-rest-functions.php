@@ -527,57 +527,318 @@ function geodir_rest_get_review_sorting() {
     return apply_filters( 'geodir_reviews_rating_comment_shorting', $sorting );
 }
 
-function geodir_get_item_schema( $post_type ) {
-    $package_id     = '';
-    $default        = 'all';
-    $custom_fields  = geodir_post_custom_fields( $package_id, $default, $post_type );
-    
-    $geodir_schema = array();
-    
-    foreach ( $custom_fields as $id => $field ) {
-        $args           = array();
-        
-        $name           = $field['htmlvar_name'];
-        $field_type     = $field['field_type'];
-        $title          = $field['site_title'] ? $field['site_title'] : $field['admin_title'];
-        $description    = $field['desc'];
-        $required       = $field['is_required'];
-        $default        = $field['default'];
-        $options        = $field['options'];
-        
-        $args['title']         = __( $title, 'geodirectory' );
-        $args['description']   = __( $description, 'geodirectory' );
-        
-        $continue = false;
-        
-        switch ( $field_type ) {
-            case 'text':
-                $args['type']       = 'text';
-                $args['context']    = array( 'view', 'edit' );
+function geodir_rest_data_type_to_field_type( $data_type ) {
+    switch ( strtolower( $data_type ) ) {
+        case 'float':
+            $type = 'number';
             break;
-            case 'multiselect':
-                $args['type']       = 'text';
-                $args['context']    = array( 'view', 'edit' );
-                $args['enum']       = $options;
-                $args['items']      = array( 'type' => '' );
+        case 'int':
+        case 'tinyint':
+        case 'integer':
+            $type = 'integer';
+        case 'date':
+        case 'time':
+        case 'text':
+        case 'varchar':
+        default:
+            $type = 'string';
             break;
-            default:
-                $continue = true;
-            break;
-        }
-        
-        if ( $continue ) {
-            continue;
-        }
-        
-        $args['required']      = (bool)$required;
-        $args['default']       = $default;
-        
-        $geodir_schema[ $name ] = $args;
     }
     
-    //gddev_log( $geodir_schema, 'geodir_schema', __FILE__, __LINE__ );
-    //gddev_log( $custom_fields, 'custom_fields', __FILE__, __LINE__ );
-    
-    return $geodir_schema;
+    return $type;
 }
+
+function geodir_rest_get_enum_values( $options ) {
+    $values = array();
+    
+    if ( !empty( $options ) ) {
+        foreach ( $options as $option ) {
+            if ( isset( $option['value'] ) && $option['value'] !== '' && empty( $option['optgroup'] ) ) {
+                $values[] = $option['value'];
+            }            
+        }
+    }
+    
+    return $values;
+}
+
+function geodir_rest_is_active( $option ) {
+    switch ( $option ) {
+        case 'location':
+            $return = defined( 'GEODIRLOCATION_VERSION' ) ? true : false;
+            break;
+        case 'neighbourhood':
+            $return = geodir_rest_is_active( 'location' ) && get_option( 'location_neighbourhoods' ) ? true : false;
+            break;
+        case 'payment':
+            $return = defined( 'GEODIRPAYMENT_VERSION' ) ? true : false;
+            break;
+        case 'event':
+            $return = defined( 'GDEVENTS_VERSION' ) ? true : false;
+            break;
+        case 'event_recurring':
+            $return = geodir_rest_is_active( 'event' ) && !( (bool)get_option( 'geodir_event_disable_recurring' ) ) ? true : false;
+            break;
+        case 'reviewrating':
+            $return = defined( 'GEODIRREVIEWRATING_VERSION' ) ? true : false;
+            break;
+        case 'claim':
+            $return = defined( 'GEODIRCLAIM_VERSION' ) && get_option( 'geodir_claim_enable' ) == 'yes' ? true : false;
+            break;
+        default:
+            $return = false;
+            break;
+    }
+    
+    return $return;
+}
+
+function geodir_rest_advance_fields_to_schema( $schema, $post_type, $package_id, $default ) {
+    // Lisitng tags
+    $tag_taxonomy = $post_type . '_tags';
+    
+    $schema[ $tag_taxonomy ]['type']          = 'object';
+    $schema[ $tag_taxonomy ]['arg_options']   = array(
+        'sanitize_callback' => null,
+    );
+    $schema[ $tag_taxonomy ]['properties']    = array(
+        'raw' => array(
+            'description' => __( 'Field value for the object, as it exists in the database.' ),
+            'type'        => 'array',
+            'context'     => array( 'edit' ),
+            'items'       => array( 'type' => 'string' )
+        ),
+        'rendered' => array(
+            'description' => __( 'Field value for the object, transformed for display.' ),
+            'type'        => 'string',
+            'context'     => array( 'view', 'edit' ),
+            'readonly'    => true,
+        ),
+    );
+    
+    // Payment manager fields
+    if ( geodir_rest_is_active( 'payment' ) ) {
+        $default_package        = geodir_get_default_package( $post_type );
+        
+        $schema['package_id'] = array(
+            'type'           => 'integer',
+            'context'        => array( 'view', 'edit' ),
+            'title'          => __( 'Select package' ),
+            'description'    => __( 'Select a lisitng package.' ),
+            'required'       => true,
+            'default'        => !empty( $default_package->pid ) ? (int)$default_package->pid : 0,
+        );
+    }
+    
+    // Event manager fields
+    if ( $post_type == 'gd_event' && geodir_rest_is_active( 'event' ) ) {        
+        $event_recurring = geodir_rest_is_active( 'event_recurring' );
+        
+        if ( $event_recurring ) {
+            $schema['is_recurring'] = array(
+                'type'           => 'integer',
+                'context'        => array( 'view', 'edit' ),
+                'title'          => __( 'Is Recurring?' ),
+                'description'    => __( 'Listing is recurring or not?' ),
+                'required'       => true,
+                'default'        => 0,
+                'enum'           => array( 1, 0 ),
+                'items'          => array( 'type' => 'integer' ),
+            );
+        }
+        
+        $schema['event_start'] = array(
+            'type'           => 'string',
+            'context'        => array( 'view', 'edit' ),
+            'title'          => __( 'Start Date' ),
+            'description'    => __( 'Select event start date' ),
+        );
+        
+        $schema['event_end'] = array(
+            'type'           => 'string',
+            'context'        => array( 'view', 'edit' ),
+            'title'          => __( 'End Date' ),
+            'description'    => __( 'Select event end date' ),
+        );
+        
+        if ( $event_recurring ) {
+            $schema['repeat_type'] = array(
+                'type'           => 'string',
+                'context'        => array( 'view', 'edit' ),
+                'title'          => __( 'Repeats' ),
+                'description'    => __( 'Repeat type' ),
+                'default'        => 'custom',
+                'enum'           => array( 'day', 'week', 'month', 'year', 'custom' ),
+                'items'          => array( 'type' => 'string' ),
+            );
+            
+            $schema['repeat_days'] = array(
+                'type'           => 'array',
+                'context'        => array( 'view', 'edit' ),
+                'title'          => __( 'Repeat on' ),
+                'description'    => __( 'Repeat days' ),
+                'enum'           => array( 1, 2, 3, 4, 5, 6, 0 ),
+                'items'          => array( 'type' => 'integer' ),
+            );
+            
+            $schema['repeat_weeks'] = array(
+                'type'           => 'array',
+                'context'        => array( 'view', 'edit' ),
+                'title'          => __( 'Repeat by' ),
+                'description'    => __( 'Repeat weeks' ),
+                'enum'           => array( 1, 2, 3, 4, 5 ),
+                'items'          => array( 'type' => 'integer' ),
+            );
+            
+            $schema['event_recurring_dates'] = array(
+                'type'           => 'string',
+                'context'        => array( 'view', 'edit' ),
+                'title'          => __( 'Event Recurring Dates' ),
+                'description'    => __( 'Select event recurring dates' ),
+            );
+            
+            $repeat_x = array();
+            for ( $i = 1; $i <= 30; $i++ ) {
+                $repeat_x[] = $i;
+            }
+            
+            
+            $schema['repeat_x'] = array(
+                'type'           => 'array',
+                'context'        => array( 'view', 'edit' ),
+                'title'          => __( 'Repeat interval' ),
+                'description'    => __( 'Event repeat interval' ),
+                'enum'           => $repeat_x,
+                'default'        => 1,
+                'items'          => array( 'type' => 'integer' ),
+            );
+            
+            $schema['duration_x'] = array(
+                'type'           => 'integer',
+                'context'        => array( 'view', 'edit' ),
+                'title'          => __( 'Event duration' ),
+                'description'    => __( 'Event duration days' ),
+                'default'        => 1,
+            );
+            
+            $schema['repeat_end_type'] = array(
+                'type'           => 'integer',
+                'context'        => array( 'view', 'edit' ),
+                'title'          => __( 'Recurring end type' ),
+                'description'    => __( 'Select recurring end type' ),
+                'default'        => 0,
+                'enum'           => array( 1, 0 ),
+                'items'          => array( 'type' => 'integer' ),
+            );
+            
+            $schema['max_repeat'] = array(
+                'type'           => 'integer',
+                'context'        => array( 'view', 'edit' ),
+                'title'          => __( 'Max Repeat' ),
+                'description'    => __( 'Select max event repeat times' ),
+                'default'        => 1,
+            );
+            
+            $schema['repeat_end'] = array(
+                'type'           => 'string',
+                'context'        => array( 'view', 'edit' ),
+                'title'          => __( 'Repeat end on' ),
+                'description'    => __( 'Select repeat end date' ),
+            );
+        }
+        
+        $schema['all_day'] = array(
+            'type'           => 'integer',
+            'context'        => array( 'view', 'edit' ),
+            'title'          => __( 'All day' ),
+            'description'    => __( 'Select to set event for all day' ),
+            'required'       => true,
+            'default'        => 0,
+            'enum'           => array( 1, 0 ),
+            'items'          => array( 'type' => 'integer' ),
+        );
+        
+        $schema['starttime'] = array(
+            'type'           => 'string',
+            'context'        => array( 'view', 'edit' ),
+            'title'          => __( 'Start Time' ),
+            'description'    => __( 'Select event start time' ),
+        );
+        
+        $schema['endtime'] = array(
+            'type'           => 'string',
+            'context'        => array( 'view', 'edit' ),
+            'title'          => __( 'End Time' ),
+            'description'    => __( 'Select event end time' ),
+        );
+            
+        if ( $event_recurring ) {
+            $schema['different_times'] = array(
+                'type'           => 'integer',
+                'context'        => array( 'view', 'edit' ),
+                'title'          => __( 'Different Event Times' ),
+                'description'    => __( 'Select to different dates have different start and end times' ),
+                'required'       => true,
+                'default'        => 0,
+                'enum'           => array( 1, 0 ),
+                'items'          => array( 'type' => 'integer' ),
+            );
+            
+            $schema['starttimes'] = array(
+                'type'           => 'array',
+                'context'        => array( 'view', 'edit' ),
+                'title'          => __( 'Start Times' ),
+                'description'    => __( 'Select event start times' ),
+                'items'          => array( 'type' => 'string' ),
+            );
+            
+            $schema['endtimes'] = array(
+                'type'           => 'array',
+                'context'        => array( 'view', 'edit' ),
+                'title'          => __( 'End Times' ),
+                'description'    => __( 'Select event end times' ),
+                'items'          => array( 'type' => 'string' ),
+            );
+        }
+        
+        $schema['recurring_dates'] = array(
+            'type'           => 'string',
+            'context'        => array( 'view', 'edit' ),
+            'title'          => __( 'Recurring dates' ),
+            'description'    => __( 'Select recurring dates' ),
+            'readonly'       => true,
+        );
+        
+        $schema['event_reg_desc'] = array(
+            'type'           => 'string',
+            'context'        => array( 'view', 'edit' ),
+            'title'          => __( 'Registration Info' ),
+            'description'    => __( 'Basic HTML tags are allowed.' ),
+        );
+        
+        $schema['event_reg_fees'] = array(
+            'type'           => 'number',
+            'context'        => array( 'view', 'edit' ),
+            'title'          => __( 'Registration Fees' ),
+            'description'    => __( 'Enter registration fees.' ),
+            'required'       => false,
+        );
+    }
+    
+    // Claim manager fields
+    if ( geodir_rest_is_active( 'claim' ) ) {
+        $schema['claimed'] = array(
+            'type'           => 'integer',
+            'context'        => array( 'view', 'edit' ),
+            'title'          => __( 'Is Claimed?' ),
+            'description'    => __( 'Listing is claimed or not?' ),
+            'required'       => true,
+            'default'        => 0,
+            'enum'           => array( 1, 0 ),
+            'items'          => array( 'type' => 'integer' ),
+        );
+    }
+    
+    return $schema;
+}
+add_filter( 'geodir_listing_item_schema', 'geodir_rest_advance_fields_to_schema', 10, 4 );
