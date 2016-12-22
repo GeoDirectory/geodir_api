@@ -79,7 +79,7 @@ if ( !class_exists('Geodir_REST') ) {
             register_deactivation_hook( __FILE__, array( 'Geodir_REST', 'deactivation' ) );
             register_uninstall_hook( __FILE__, array( 'Geodir_REST', 'uninstall' ) );
             
-            add_action( 'rest_api_init', array( $this , 'geodir_register_fields' ) );
+            add_action( 'rest_api_init', array( $this , 'rest_api_init' ) );
             add_action( 'rest_api_init', array( $this , 'setup_geodir_rest' ), 100 );
             /**
              * Fires after the setup of all Geodir_REST actions.
@@ -126,6 +126,10 @@ if ( !class_exists('Geodir_REST') ) {
         }
         
         public function includes() {
+            require_once( GEODIR_REST_PLUGIN_DIR . 'includes/geodir-rest-functions.php' );
+            require_once( GEODIR_REST_PLUGIN_DIR . 'includes/geodir-rest-listings-functions.php' );
+            require_once( GEODIR_REST_PLUGIN_DIR . 'includes/geodir-rest-taxonomies-functions.php' );
+            
             if (!is_admin()) {
                 if ( !function_exists( 'is_plugin_active' ) ) {
                     require_once( ABSPATH . 'wp-admin/includes/plugin.php' );
@@ -136,9 +140,12 @@ if ( !class_exists('Geodir_REST') ) {
                 require_once( GEODIR_REST_PLUGIN_DIR . 'includes/endpoints/class-geodir-rest-listings-controller.php' );
                 require_once( GEODIR_REST_PLUGIN_DIR . 'includes/endpoints/class-geodir-rest-post-types-controller.php' );
                 require_once( GEODIR_REST_PLUGIN_DIR . 'includes/endpoints/class-geodir-rest-reviews-controller.php' );
+                require_once( GEODIR_REST_PLUGIN_DIR . 'includes/endpoints/class-geodir-rest-countries-controller.php' );
+                if ( geodir_rest_is_active( 'location' ) ) {
+                    require_once( GEODIR_REST_PLUGIN_DIR . 'includes/endpoints/class-geodir-rest-location-types-controller.php' );
+                    require_once( GEODIR_REST_PLUGIN_DIR . 'includes/endpoints/class-geodir-rest-locations-controller.php' );
+                }
             }
-            
-            include_once( GEODIR_REST_PLUGIN_DIR . 'includes/geodir-rest-functions.php' );
         }
         
         public function init() {
@@ -187,6 +194,26 @@ if ( !class_exists('Geodir_REST') ) {
             echo '<div class="error"><p>' . wp_sprintf( __( 'GeoDirectory Rest API requires at least WordPress version 4.7. You are using WordPress version %s. <a href="%s" target="_blank">Update Version</a>.', 'geodir_rest' ), $wp_version, network_admin_url( 'update-core.php' ) ) . '</p></div>';
         }
         
+        public function rest_api_init() {
+            $gd_post_types = geodir_get_posttypes();
+            
+            $this->geodir_register_fields();
+            
+            foreach ( $gd_post_types as $post_type ) {
+                // listings
+                add_filter( 'rest_' . $post_type . '_collection_params', 'geodir_rest_listing_collection_params', 10, 2 );
+                add_filter( 'rest_' . $post_type . '_query', 'geodir_rest_listing_query', 10, 2 );
+                
+                // categories
+                add_filter( 'rest_' . $post_type . 'category_collection_params', 'geodir_rest_taxonomy_collection_params', 10, 2 );
+                add_filter( 'rest_' . $post_type . 'category_query', 'geodir_rest_taxonomy_query', 10, 2 );
+                
+                // tags
+                add_filter( 'rest_' . $post_type . '_tags_collection_params', 'geodir_rest_taxonomy_collection_params', 10, 2 );
+                add_filter( 'rest_' . $post_type . '_tags_query', 'geodir_rest_taxonomy_query', 10, 2 );
+            }
+        }
+        
         public function setup_geodir_rest() {
             if ( defined( 'REST_REQUEST' ) && REST_REQUEST ) {
                 $this->setup_geodir_rest_endpoints();
@@ -195,6 +222,7 @@ if ( !class_exists('Geodir_REST') ) {
                 add_filter( 'get_comment', 'geodir_rest_get_comment', 10, 1 );
                 
                 add_action( 'rest_insert_comment', array( $this, 'save_review' ), 10, 3 );
+                add_filter( 'rest_gd_placecategory_collection_params', 'geodir_rest_taxonomy_collection_params', 10, 2 );
             }
         }
         
@@ -232,6 +260,24 @@ if ( !class_exists('Geodir_REST') ) {
 
             $controller = new Geodir_REST_Reviews_Controller;
             $controller->register_routes();
+            
+            $controller = new Geodir_REST_Countries_Controller;
+            $controller->register_routes();
+            
+            // Locations
+            if ( geodir_rest_is_active( 'location' ) ) {
+                $controller = new Geodir_REST_Location_Types_Controller;
+                $controller->register_routes();
+                
+                $location_types = geodir_rest_get_location_types();
+                
+                if ( !empty( $location_types ) ) {
+                    foreach ( $location_types as $type => $args ) {
+                        $controller = new Geodir_REST_Locations_Controller( $type );
+                        $controller->register_routes();
+                    }
+                }
+            }
         }
         
         public function register_fields( $post_type ) {
@@ -248,7 +294,7 @@ if ( !class_exists('Geodir_REST') ) {
         }
         
         public function geodir_register_fields() {            
-             global $wp_post_types;
+            global $wp_post_types;
              
             $gd_post_types = geodir_get_posttypes();
 

@@ -174,6 +174,112 @@ class Geodir_REST_Terms_Controller extends WP_REST_Terms_Controller {
 
 		return $links;
 	}
+    
+	/**
+	 * Retrieves the query params for collections.
+	 *
+	 * @access public
+	 *
+	 * @return array Collection parameters.
+	 */
+	public function get_collection_params() {
+		$query_params = parent::get_collection_params();
+		$taxonomy = get_taxonomy( $this->taxonomy );
+
+		$query_params['context']['default'] = 'view';
+
+		$query_params['exclude'] = array(
+			'description'       => __( 'Ensure result set excludes specific IDs.' ),
+			'type'              => 'array',
+			'items'             => array(
+				'type'          => 'integer',
+			),
+			'default'           => array(),
+		);
+
+		$query_params['include'] = array(
+			'description'       => __( 'Limit result set to specific IDs.' ),
+			'type'              => 'array',
+			'items'             => array(
+				'type'          => 'integer',
+			),
+			'default'           => array(),
+		);
+
+		if ( ! $taxonomy->hierarchical ) {
+			$query_params['offset'] = array(
+				'description'       => __( 'Offset the result set by a specific number of items.' ),
+				'type'              => 'integer',
+			);
+		}
+
+		$query_params['order'] = array(
+			'description'       => __( 'Order sort attribute ascending or descending.' ),
+			'type'              => 'string',
+			'default'           => 'asc',
+			'enum'              => array(
+				'asc',
+				'desc',
+			),
+		);
+
+		$query_params['orderby'] = array(
+			'description'       => __( 'Sort collection by term attribute.' ),
+			'type'              => 'string',
+			'default'           => 'name',
+			'enum'              => array(
+				'id',
+				'include',
+				'name',
+				'slug',
+				'term_group',
+				'description',
+				'count',
+			),
+		);
+
+		$query_params['hide_empty'] = array(
+			'description'       => __( 'Whether to hide terms not assigned to any posts.' ),
+			'type'              => 'boolean',
+			'default'           => false,
+		);
+
+		if ( $taxonomy->hierarchical ) {
+			$query_params['parent'] = array(
+				'description'       => __( 'Limit result set to terms assigned to a specific parent.' ),
+				'type'              => 'integer',
+			);
+		}
+
+		$query_params['post'] = array(
+			'description'       => __( 'Limit result set to terms assigned to a specific post.' ),
+			'type'              => 'integer',
+			'default'           => null,
+		);
+
+		$query_params['slug'] = array(
+			'description'       => __( 'Limit result set to terms with a specific slug.' ),
+			'type'              => 'string',
+		);
+        
+        $query_params = geodir_rest_taxonomy_collection_params( $query_params, $taxonomy );
+
+		/**
+		 * Filter collection parameters for the terms controller.
+		 *
+		 * The dynamic part of the filter `$this->taxonomy` refers to the taxonomy
+		 * slug for the controller.
+		 *
+		 * This filter registers the collection parameter, but does not map the
+		 * collection parameter to an internal WP_Term_Query parameter.  Use the
+		 * `rest_{$this->taxonomy}_query` filter to set WP_Term_Query parameters.
+		 *
+		 *
+		 * @param $params JSON Schema-formatted collection parameters.
+		 * @param WP_Taxonomy $taxonomy_obj Taxonomy object.
+		 */
+		return apply_filters( 'rest_{$this->taxonomy}_collection_params', $query_params, $taxonomy );
+	}
 
 	/**
 	 * Checks that the taxonomy is valid.

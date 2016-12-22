@@ -193,33 +193,27 @@ class Geodir_REST_Listings_Controller extends WP_REST_Posts_Controller {
 			'description'        => __( 'Offset the result set by a specific number of items.' ),
 			'type'               => 'integer',
 		);
-        
-        $sort_options =     geodir_rest_get_listing_sorting( $this->post_type );
- 
-        $orderby            = array_keys( $sort_options['sorting'] );
-        $orderby_rendered   = $sort_options['sorting'];
-        $default_orderby    = $sort_options['default_sortby'];
-        $default_order      = $sort_options['default_sort'];
-        
+
 		$params['order'] = array(
 			'description'        => __( 'Order sort attribute ascending or descending.' ),
 			'type'               => 'string',
-            'default'            => $default_order,
+			'default'            => 'desc',
 			'enum'               => array( 'asc', 'desc' ),
 		);
 
 		$params['orderby'] = array(
 			'description'        => __( 'Sort collection by object attribute.' ),
 			'type'               => 'string',
-            'default'            => $default_orderby,
-            'enum'               => $orderby,
+			'default'            => 'date',
+			'enum'               => array(
+				'date',
+				'relevance',
+				'id',
+				'include',
+				'title',
+				'slug',
+			),
 		);
-        
-        $params['orderby_rendered']    = array(
-            'description'        => __( 'All sorting options for listings.' ),
-            'type'               => 'array',
-            'enum'               => $orderby_rendered
-        );
 
 		if ( 'page' === $this->post_type || post_type_supports( $this->post_type, 'page-attributes' ) ) {
 			$params['orderby']['enum'][] = 'menu_order';
@@ -421,6 +415,44 @@ class Geodir_REST_Listings_Controller extends WP_REST_Posts_Controller {
 				);
 			}
 		}
+        
+        if ( !empty( $post->post_location_id ) && geodir_rest_is_active( 'location' ) && $location = geodir_get_location_by_id( NULL, $post->post_location_id ) ) {
+            $location_links = array();
+            
+            $location_links[] = array(
+                'href'          => rest_url( sprintf( '%s/%s/%s/%s', $this->namespace, 'locations', 'countries', $location->country_slug ) ),
+                'location'      => 'country',
+                'embeddable'    => true,
+            );
+            
+            $add_query_args = array( 'country' => $location->country_slug );
+            
+            $location_links[] = array(
+                'href'          => add_query_arg( $add_query_args, rest_url( sprintf( '%s/%s/%s/%s', $this->namespace, 'locations', 'regions', $location->region_slug ) ) ),
+                'location'      => 'region',
+                'embeddable'    => true,
+            );
+            
+            $add_query_args['region'] = $location->region_slug;
+            
+            $location_links[] = array(
+                'href'          => add_query_arg( $add_query_args, rest_url( sprintf( '%s/%s/%s/%s', $this->namespace, 'locations', 'cities', $location->city_slug ) ) ),
+                'location'      => 'city',
+                'embeddable'    => true,
+            );
+            
+            if ( !empty( $post->gd_neighbourhood ) && geodir_rest_is_active( 'neighbourhood' ) ) {
+                $add_query_args['city'] = $location->city_slug;
+                
+                $location_links[] = array(
+                    'href'          => add_query_arg( $add_query_args, rest_url( sprintf( '%s/%s/%s/%s', $this->namespace, 'locations', 'neighbourhoods', $post->gd_neighbourhood ) ) ),
+                    'location'      => 'neighbourhood',
+                    'embeddable'    => true,
+                );
+            }
+            
+            $links['https://api.w.org/location'] = $location_links;
+        }
 
 		return $links;
 	}
@@ -450,9 +482,7 @@ class Geodir_REST_Listings_Controller extends WP_REST_Posts_Controller {
         
         if ( !is_wp_error( $post_id ) ) {
             $gd_post = $this->prepare_item_for_geodir_database( $request, $post_id );
-            //gddev_log( $gd_post, 'gd_post', __FILE__, __LINE__ );
             $post_id = geodir_save_listing( $gd_post, null, true );
-            //gddev_log( $post_id, 'post_id', __FILE__, __LINE__ );
         }
 
 		if ( is_wp_error( $post_id ) ) {
@@ -543,7 +573,6 @@ class Geodir_REST_Listings_Controller extends WP_REST_Posts_Controller {
 	 */
 	protected function prepare_item_for_geodir_database( $request, $post_id = 0 ) {
         $prepared_post = $request->get_params();
-        //gddev_log( $prepared_post, 'prepared_post', __FILE__, __LINE__ );
         
         // Post ID.
         if ( isset( $request['id'] ) ) {
@@ -583,7 +612,6 @@ class Geodir_REST_Listings_Controller extends WP_REST_Posts_Controller {
             $prepared_post['post_category'][ $this->cat_taxonomy ] = $post_category;
         }
 
-        //gddev_log( $prepared_post, 'prepared_post', __FILE__, __LINE__ );
         /**
          * Filters a post before it is inserted via the REST API.
          *
@@ -917,12 +945,10 @@ class Geodir_REST_Listings_Controller extends WP_REST_Posts_Controller {
     }
     
     public function geodir_get_callback( $object, $field_name, $request, $object_type ) {
-        //gddev_log( $field_name, 'geodir_get_callback()', __FILE__, __LINE__ );
         return $object;
     }
     
     public function geodir_update_callback( $value, $object, $field_name, $request, $object_type ) {
-        //gddev_log( $field_name, 'geodir_update_callback()', __FILE__, __LINE__ );
         return true;
     }
 }
