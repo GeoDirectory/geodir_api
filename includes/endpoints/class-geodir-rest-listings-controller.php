@@ -466,6 +466,8 @@ class Geodir_REST_Listings_Controller extends WP_REST_Posts_Controller {
 	 * @return WP_REST_Response|WP_Error Response object on success, or WP_Error object on failure.
 	 */
 	public function create_item( $request ) {
+        global $post, $wpdb, $gd_permalink_cache;
+        
 		if ( ! empty( $request['id'] ) ) {
 			return new WP_Error( 'rest_post_exists', __( 'Cannot create existing post.' ), array( 'status' => 400 ) );
 		}
@@ -481,6 +483,11 @@ class Geodir_REST_Listings_Controller extends WP_REST_Posts_Controller {
 		$post_id = wp_insert_post( wp_slash( (array) $prepared_post ), true );
         
         if ( !is_wp_error( $post_id ) ) {
+            if ( !empty( $gd_permalink_cache ) && isset( $gd_permalink_cache[$post_id] ) ) {
+                unset( $gd_permalink_cache[$post_id] );
+            }
+            $post = get_post( $post_id );
+            
             $gd_post = $this->prepare_item_for_geodir_database( $request, $post_id );
             $post_id = geodir_save_listing( $gd_post, null, true );
         }
@@ -494,7 +501,10 @@ class Geodir_REST_Listings_Controller extends WP_REST_Posts_Controller {
 			}
 
 			return $post_id;
-		}
+		} else {
+            $wpdb->update( $wpdb->posts, array( 'guid' => get_permalink( $post_id ) ), array( 'ID' => $post_id ) );
+            clean_post_cache( $post_id );
+        }
 
 		$post = get_post( $post_id );
 
@@ -564,6 +574,105 @@ class Geodir_REST_Listings_Controller extends WP_REST_Posts_Controller {
 	}
     
 	/**
+	 * Updates a single post.
+	 *
+	 * @access public
+	 *
+	 * @param WP_REST_Request $request Full details about the request.
+	 * @return WP_REST_Response|WP_Error Response object on success, or WP_Error object on failure.
+	 */
+	public function update_item( $request ) {
+        global $post, $wpdb;
+        
+		$id   = (int) $request['id'];
+		$post = get_post( $id );
+
+		if ( empty( $id ) || empty( $post->ID ) || $this->post_type !== $post->post_type ) {
+			return new WP_Error( 'rest_post_invalid_id', __( 'Invalid post ID.' ), array( 'status' => 404 ) );
+		}
+
+		$post = $this->prepare_item_for_database( $request );
+
+		if ( is_wp_error( $post ) ) {
+			return $post;
+		}
+
+		// convert the post object to an array, otherwise wp_update_post will expect non-escaped input.
+		$post_id = wp_update_post( wp_slash( (array) $post ), true );
+        
+        if ( !is_wp_error( $post_id ) ) {
+            $gd_post = $this->prepare_item_for_geodir_database( $request, $post_id );
+            $post_id = geodir_save_listing( $gd_post, null, true );
+        }
+
+		if ( is_wp_error( $post_id ) ) {
+			if ( 'db_update_error' === $post_id->get_error_code() ) {
+				$post_id->add_data( array( 'status' => 500 ) );
+			} else {
+				$post_id->add_data( array( 'status' => 400 ) );
+			}
+			return $post_id;
+		} else {
+            $wpdb->update( $wpdb->posts, array( 'guid' => get_permalink( $post_id ) ), array( 'ID' => $post_id ) );
+            clean_post_cache( $post_id );
+        }
+
+		$post = get_post( $post_id );
+
+		/* This action is documented in lib/endpoints/class-wp-rest-controller.php */
+		do_action( "rest_insert_{$this->post_type}", $post, $request, false );
+
+		$schema = $this->get_item_schema();
+
+		if ( ! empty( $schema['properties']['format'] ) && ! empty( $request['format'] ) ) {
+			set_post_format( $post, $request['format'] );
+		}
+
+		if ( ! empty( $schema['properties']['featured_media'] ) && isset( $request['featured_media'] ) ) {
+			$this->handle_featured_media( $request['featured_media'], $post_id );
+		}
+
+		if ( ! empty( $schema['properties']['sticky'] ) && isset( $request['sticky'] ) ) {
+			if ( ! empty( $request['sticky'] ) ) {
+				stick_post( $post_id );
+			} else {
+				unstick_post( $post_id );
+			}
+		}
+
+		if ( ! empty( $schema['properties']['template'] ) && isset( $request['template'] ) ) {
+			$this->handle_template( $request['template'], $post->ID );
+		}
+
+		$terms_update = $this->handle_terms( $post->ID, $request );
+
+		if ( is_wp_error( $terms_update ) ) {
+			return $terms_update;
+		}
+
+		if ( ! empty( $schema['properties']['meta'] ) && isset( $request['meta'] ) ) {
+			$meta_update = $this->meta->update_value( $request['meta'], $post->ID );
+
+			if ( is_wp_error( $meta_update ) ) {
+				return $meta_update;
+			}
+		}
+
+		$post = get_post( $post_id );
+		$fields_update = $this->update_additional_fields_for_object( $post, $request );
+
+		if ( is_wp_error( $fields_update ) ) {
+			return $fields_update;
+		}
+
+		$request->set_param( 'context', 'edit' );
+
+		$response = $this->prepare_item_for_response( $post, $request );
+
+		return rest_ensure_response( $response );
+	}
+    
+	/**
 	 * Prepares a single post for create or update.
 	 *
 	 * @access protected
@@ -610,6 +719,15 @@ class Geodir_REST_Listings_Controller extends WP_REST_Posts_Controller {
             }
             
             $prepared_post['post_category'][ $this->cat_taxonomy ] = $post_category;
+        }
+        
+        // Post tags.
+        if ( isset( $request[ $this->tag_taxonomy ] ) ) {
+            $post_tags = empty( $request[ $this->tag_taxonomy ] ) || is_array( $request[ $this->tag_taxonomy ] ) ? $request[ $this->tag_taxonomy ] : explode( ',', $request[ $this->tag_taxonomy ] );
+            
+            $prepared_post['post_tags'] = $post_tags;
+            
+            wp_set_object_terms( $post_id, $prepared_post['post_tags'], $this->tag_taxonomy );
         }
 
         /**
