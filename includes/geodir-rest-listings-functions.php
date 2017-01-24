@@ -634,6 +634,19 @@ function geodir_rest_listing_collection_params( $params, $post_type_obj ) {
             );
         }
     }
+    
+    if ( $post_type == 'gd_event' ) {
+        $params['event_type'] = array(
+            'default'           => get_option('geodir_event_defalt_filter'),
+            'description'       => __( 'Limit events to specific event type.' ),
+            'type'              => 'array',
+            'items'             => array(
+                'enum'          => array( 'all', 'today', 'upcoming', 'past' ),
+                'type'          => 'string',
+            ),
+            'sanitize_callback'  => 'sanitize_text_field',
+        );
+    }
         
     return $params;
 }
@@ -675,6 +688,12 @@ function geodir_rest_listing_query( $args, $request ) {
         }
     }
     
+    if ( geodir_rest_is_active( 'event' ) ) {        
+        if ( !empty( $request['event_type'] ) ) {
+            $args['event_type'] = $request['event_type'];
+        }
+    }
+    
     add_filter( 'posts_clauses_request', 'geodir_rest_listing_posts_clauses_request', 10, 2 );
     
     return $args;
@@ -690,11 +709,180 @@ function geodir_rest_listing_posts_clauses_request( $clauses, $WP_Query ) {
         return $clauses;
     }
     
-    $clauses['fields']  = apply_filters( 'geodir_rest_listing_posts_clauses_fields', $clauses['fields'], $post_type, $query_vars );
-    $clauses['join']    = apply_filters( 'geodir_rest_listing_posts_clauses_join', $clauses['join'], $post_type, $query_vars );
-    $clauses['where']   = apply_filters( 'geodir_rest_listing_posts_clauses_where', $clauses['where'], $post_type, $query_vars );
+    $clauses['where']       = apply_filters( 'geodir_rest_listing_posts_clauses_where', $clauses['where'], $post_type, $query_vars );
+    $clauses['groupby']     = apply_filters( 'geodir_rest_listing_posts_clauses_groupby', $clauses['groupby'], $post_type, $query_vars );
+    $clauses['join']        = apply_filters( 'geodir_rest_listing_posts_clauses_join', $clauses['join'], $post_type, $query_vars );
+    $clauses['orderby']     = apply_filters( 'geodir_rest_listing_posts_clauses_orderby', $clauses['orderby'], $post_type, $query_vars );
+    $clauses['distinct']    = apply_filters( 'geodir_rest_listing_posts_clauses_distinct', $clauses['distinct'], $post_type, $query_vars );
+    $clauses['fields']      = apply_filters( 'geodir_rest_listing_posts_clauses_fields', $clauses['fields'], $post_type, $query_vars );
+    $clauses['limits']      = apply_filters( 'geodir_rest_listing_posts_clauses_limits', $clauses['limits'], $post_type, $query_vars );
 
     return apply_filters( 'geodir_rest_listing_posts_clauses_request', $clauses, $post_type, $query_vars );
+}
+
+function geodir_rest_listing_posts_clauses_orderby( $orderby, $post_type, $query_vars ) {
+    $default_orderby = $orderby;
+    $table = geodir_rest_post_table( $post_type );
+    
+    $sorting = !empty( $query_vars['orderby'] ) ? $query_vars['orderby'] : geodir_get_posts_default_sort( $post_type );
+    
+    if ( !empty( $query_vars['s'] ) ) {
+        if ( !empty( $_REQUEST['snear'] ) && $sorting != 'farthest' ) {
+            $sorting = 'nearest';
+        }
+    }
+    
+    switch ( $sorting ) {
+        case 'az':
+            $sort_by = 'post_title_asc';
+            break;
+        case 'za':
+            $sort_by = 'post_title_desc';
+            break;
+        case 'newest':
+            $sort_by = 'post_date_desc';
+            break;
+        case 'oldest':
+            $sort_by = 'post_date_asc';
+            break;
+        case 'low_review':
+            $sort_by = 'rating_count_asc';
+            break;
+        case 'high_review':
+            $sort_by = 'rating_count_desc';
+            break;
+        case 'low_rating':
+            $sort_by = 'overall_rating_asc';
+            break;
+        case 'high_rating':
+            $sort_by = 'overall_rating_desc';
+            break;
+        case 'featured':
+            $sort_by = 'is_featured_asc';
+            break;
+        case 'nearest':
+            $sort_by = 'distance_asc';
+            break;
+        case 'farthest':
+            $sort_by = 'distance_desc';
+            break;
+        default:
+            $sort_by = $sorting;
+            break;
+    }
+    
+    $orderby = geodir_rest_listing_custom_orderby( $orderby, $sort_by, $post_type, $query_vars );
+
+    if ( !empty( $query_vars['s'] ) ) {
+        $keywords = explode( " ", $query_vars['s'] );
+        
+        if ( is_array( $keywords ) && $klimit = get_option( 'geodir_search_word_limit' ) ) {
+            foreach ( $keywords as $kkey => $kword ) {
+                if ( mb_strlen( $kword, 'UTF-8' ) <= $klimit ) {
+                    unset( $keywords[$kkey] );
+                }
+            }
+        }
+        
+        if ( $sorting == 'nearest' || $sorting == 'farthest' ) {
+            if ( count( $keywords ) > 1 ) {
+                $orderby = $orderby . " ( gd_titlematch * 2 + gd_featured * 5 + gd_exacttitle * 10 + gd_alltitlematch_part * 100 + gd_titlematch_part * 50 + gd_content * 1.5) DESC, ";
+            } else {
+                $orderby = $orderby . " ( gd_titlematch * 2 + gd_featured * 5 + gd_exacttitle * 10 + gd_content * 1.5) DESC, ";
+            }
+        } else {
+            if ( count( $keywords ) > 1 ) {
+                $orderby = "( gd_titlematch * 2 + gd_featured * 5 + gd_exacttitle * 10 + gd_alltitlematch_part * 100 + gd_titlematch_part * 50 + gd_content * 1.5) DESC, " . $orderby;
+            } else {
+                $orderby = "( gd_titlematch * 2 + gd_featured * 5 + gd_exacttitle * 10 + gd_content * 1.5) DESC, " . $orderby;
+            }
+        }
+    }
+
+    return apply_filters( 'geodir_rest_listing_posts_orderby_query', $orderby, $sorting, $default_orderby, $post_type, $query_vars );
+}
+add_filter( 'geodir_rest_listing_posts_clauses_orderby', 'geodir_rest_listing_posts_clauses_orderby', 100, 3 );
+
+function geodir_rest_listing_events_orderby_query( $orderby, $sorting, $default_orderby, $post_type, $query_vars ) {
+    global $wpdb;
+    
+    if ( empty( $orderby ) ) {
+        return $orderby;
+    }
+    
+    $table = geodir_rest_post_table( $post_type );
+    $orderby = rtrim( trim( $orderby ), "," );
+    
+    if ( $post_type == 'gd_event' ) {
+        $orderby .= ", " . EVENT_SCHEDULE . ".event_date ASC, " . EVENT_SCHEDULE . ".event_starttime ASC";
+    }
+   
+    if ( strpos( $orderby, strtolower( $table . ".is_featured" )  ) === false ) {
+        $orderby .= ", " . $table . ".is_featured ASC";
+    }
+    
+    if ( strpos( $orderby, strtolower( $wpdb->posts . ".post_date" )  ) === false ) {
+        $orderby .= ", " . $wpdb->posts . ".post_date DESC";
+    }
+    
+    if ( strpos( $orderby, strtolower( $wpdb->posts . ".post_title" )  ) === false ) {
+        $orderby .= ", " . $wpdb->posts . ".post_title ASC";
+    }
+    
+    return $orderby;
+}
+add_filter( 'geodir_rest_listing_posts_orderby_query', 'geodir_rest_listing_events_orderby_query', 10, 5 );
+
+function geodir_rest_listing_custom_orderby( $orderby, $sorting, $post_type, $query_vars ) {
+    global $wpdb;
+
+    if ( $sorting != '' ) {
+        if ( $sorting == 'random' ) {
+            $orderby = "RAND(), ";
+        } else {
+            $sorting_array = explode( '_', $sorting );
+
+            if ( ( $count = count( $sorting_array ) ) > 1 ) {
+                $table = geodir_rest_post_table( $post_type );
+                $order = !empty( $sorting_array[$count - 1] ) ? strtoupper( $sorting_array[$count - 1] ) : '';
+
+                array_pop( $sorting_array );
+                
+                if ( !empty( $sorting_array ) && ( $order == 'ASC' || $order == 'DESC' ) ) {
+                    $sort_by = implode( '_', $sorting_array );
+                    
+                    switch ( $sort_by ) {
+                        case 'post_title':
+                        case 'post_date':
+                            $orderby = "$wpdb->posts." . $sort_by . " " . $order . ", ";
+                        break;
+                        case 'comment_count':
+                            $orderby = "$wpdb->posts." . $sort_by . " " . $order . ", ".$table . ".overall_rating " . $order . ", ";
+                        break;
+                        case 'overall_rating':
+                            $orderby = $table . "." . $sort_by . " " . $order . ", " . $table . ".rating_count " . $order . ", ";
+                        break;
+                        case 'rating_count':
+                            $orderby = $table . "." . $sort_by . " " . $order . ", " . $table . ".overall_rating " . $order . ", ";
+                        break;
+                        case 'distance':
+                            $orderby = $sort_by . " " . $order . ", ";
+                        break;
+                        case 'random':
+                            $orderby = "RAND(), ";
+                        break;
+                        default:
+                            if ( geodir_column_exist( $table, $sort_by ) ) {
+                                $orderby = $table . "." . $sort_by . " " . $order . ", ";
+                            }
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    
+    return $orderby;
 }
 
 function geodir_rest_listing_posts_clauses_fields( $fields, $post_type, $query_vars ) {
@@ -802,3 +990,24 @@ function geodir_rest_listing_location_where( $where, $post_type, $query_vars ) {
     return $where;
 }
 add_filter( 'geodir_rest_listing_posts_clauses_where', 'geodir_rest_listing_location_where', 10, 3 );
+
+function geodir_rest_listing_events_filter( $where, $post_type, $query_vars ) {
+    global $wpdb;
+    
+    if ( empty( $query_vars['is_gd_api'] ) || $post_type != 'gd_event' || empty( $query_vars['event_type'] ) ) {
+        return $where;
+    }
+    
+    $today = date_i18n( 'Y-m-d' );
+    
+    if ( $query_vars['event_type'] == 'today' ) {
+        $where .= " AND ( " . EVENT_SCHEDULE . ".event_date LIKE '" . $today . "%%' OR ( " . EVENT_SCHEDULE . ".event_date <= '" . $today . "' AND " . EVENT_SCHEDULE . ".event_enddate >= '" . $today . "' ) ) ";
+    } else if ( $query_vars['event_type'] == 'upcoming' ) {
+        $where .= " AND ( " . EVENT_SCHEDULE . ".event_date >= '" . $today . "' OR ( " . EVENT_SCHEDULE . ".event_date <= '" . $today . "' AND " . EVENT_SCHEDULE . ".event_enddate >= '" . $today . "' ) ) ";
+    } else if ( $query_vars['event_type'] == 'past' ) {
+        $where .= " AND " . EVENT_SCHEDULE . ".event_date < '" . $today . "' ";
+    }
+    
+    return $where;
+}
+add_filter( 'geodir_rest_listing_posts_clauses_where', 'geodir_rest_listing_events_filter', 11, 3 );
