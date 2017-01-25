@@ -694,8 +694,20 @@ function geodir_rest_listing_query( $args, $request ) {
         }
     }
     
-    add_filter( 'posts_clauses_request', 'geodir_rest_listing_posts_clauses_request', 10, 2 );
+    if ( !empty( $request['country'] ) ) {
+        $args['gd_country'] = $request['country'];
+    }
     
+    $keep_args = array( 'snear', 'all_near_me', 'near_me_range', 'user_lat', 'user_lon', 'my_location' );
+    
+    foreach ( $keep_args as $arg ) {
+        if ( !isset( $args[$arg] ) && isset( $request[$arg] ) ) {
+            $args[$arg] = $request[$arg]; 
+        }
+    }
+    
+    add_filter( 'posts_clauses_request', 'geodir_rest_listing_posts_clauses_request', 10, 2 );
+
     return $args;
 }
 
@@ -725,13 +737,13 @@ function geodir_rest_listing_posts_clauses_orderby( $orderby, $post_type, $query
     $table = geodir_rest_post_table( $post_type );
     
     $sorting = !empty( $query_vars['orderby'] ) ? $query_vars['orderby'] : geodir_get_posts_default_sort( $post_type );
-    
+
     if ( !empty( $query_vars['s'] ) ) {
-        if ( !empty( $_REQUEST['snear'] ) && $sorting != 'farthest' ) {
+        if ( !empty( $query_vars['snear'] ) && $sorting != 'farthest' ) {
             $sorting = 'nearest';
         }
     }
-    
+
     switch ( $sorting ) {
         case 'az':
             $sort_by = 'post_title_asc';
@@ -770,7 +782,7 @@ function geodir_rest_listing_posts_clauses_orderby( $orderby, $post_type, $query
             $sort_by = $sorting;
             break;
     }
-    
+   
     $orderby = geodir_rest_listing_custom_orderby( $orderby, $sort_by, $post_type, $query_vars );
 
     if ( !empty( $query_vars['s'] ) ) {
@@ -786,15 +798,15 @@ function geodir_rest_listing_posts_clauses_orderby( $orderby, $post_type, $query
         
         if ( $sorting == 'nearest' || $sorting == 'farthest' ) {
             if ( count( $keywords ) > 1 ) {
-                $orderby = $orderby . " ( gd_titlematch * 2 + gd_featured * 5 + gd_exacttitle * 10 + gd_alltitlematch_part * 100 + gd_titlematch_part * 50 + gd_content * 1.5) DESC, ";
+                $orderby = $orderby . " ( gd_titlematch * 2 + gd_featured * 5 + gd_exacttitle * 10 + gd_alltitlematch_part * 100 + gd_titlematch_part * 50 + gd_content * 1.5 ) DESC, ";
             } else {
-                $orderby = $orderby . " ( gd_titlematch * 2 + gd_featured * 5 + gd_exacttitle * 10 + gd_content * 1.5) DESC, ";
+                $orderby = $orderby . " ( gd_titlematch * 2 + gd_featured * 5 + gd_exacttitle * 10 + gd_content * 1.5 ) DESC, ";
             }
         } else {
             if ( count( $keywords ) > 1 ) {
-                $orderby = "( gd_titlematch * 2 + gd_featured * 5 + gd_exacttitle * 10 + gd_alltitlematch_part * 100 + gd_titlematch_part * 50 + gd_content * 1.5) DESC, " . $orderby;
+                $orderby = "( gd_titlematch * 2 + gd_featured * 5 + gd_exacttitle * 10 + gd_alltitlematch_part * 100 + gd_titlematch_part * 50 + gd_content * 1.5 ) DESC, " . $orderby;
             } else {
-                $orderby = "( gd_titlematch * 2 + gd_featured * 5 + gd_exacttitle * 10 + gd_content * 1.5) DESC, " . $orderby;
+                $orderby = "( gd_titlematch * 2 + gd_featured * 5 + gd_exacttitle * 10 + gd_content * 1.5 ) DESC, " . $orderby;
             }
         }
     }
@@ -900,6 +912,65 @@ function geodir_rest_listing_posts_clauses_fields( $fields, $post_type, $query_v
     
     if ( $post_type == 'gd_event' && geodir_rest_is_active( 'event' ) ) {
         $fields .= ", " . EVENT_SCHEDULE . ".*";
+    }
+    
+    $snear = isset( $query_vars['snear'] ) ? trim( $query_vars['snear'] ) : '';
+        
+    if ( ( $snear != '' || !empty( $query_vars['all_near_me'] ) ) ) {
+        $distance_radius = geodir_getDistanceRadius( get_option( 'geodir_search_dist_1' ) );
+        
+        $my_lat = !empty( $query_vars['user_lat'] ) ? $query_vars['user_lat'] : '';
+        $my_lon = !empty( $query_vars['user_lon'] ) ? $query_vars['user_lon'] : '';
+        
+        if ( empty( $my_lat ) || empty( $my_lon ) ) {
+            $default_location = geodir_get_default_location();
+            
+            $my_lat = !empty( $default_location->city_latitude ) ? $default_location->city_latitude : '0';
+            $my_lon = !empty( $default_location->city_longitude ) ? $default_location->city_longitude : '0';
+        }
+
+        $fields .= ", ( " . $distance_radius . " * 2 * ASIN( SQRT( POWER( SIN( ( ABS( " . $my_lat . " ) - ABS( " . $table . ".post_latitude ) ) * PI() / 180 / 2 ), 2 ) + COS( ABS( " . $my_lat . " ) * PI() / 180 ) * COS( ABS( " . $table . ".post_latitude ) * PI() / 180 ) * POWER( SIN( ( " . $my_lon . " - " . $table . ".post_longitude ) * PI() / 180 / 2 ), 2 ) ) ) ) AS distance";
+    }
+    
+    if ( !empty( $query_vars['s'] ) && $search = $query_vars['s'] ) {
+        $keywords = explode( ' ', $search );
+        
+        if ( is_array( $keywords ) && $klimit = get_option( 'geodir_search_word_limit' ) ) {
+            foreach( $keywords as $kkey => $kword ) {
+                if ( mb_strlen( $kword, 'UTF-8' ) <= $klimit ) {
+                    unset( $keywords[$kkey] );
+                }
+            }
+        }
+    
+        $gd_titlematch_part = '';
+        
+        if ( count( $keywords ) > 1 ) {
+            $parts = array( 'AND' => 'gd_alltitlematch_part', 'OR' => 'gd_titlematch_part' );
+            
+            foreach ( $parts as $key => $part ) {
+                $gd_titlematch_part .= " CASE WHEN ";
+                $count = 0;
+                
+                foreach ( $keywords as $keyword ) {
+                    $keyword = wp_specialchars_decode( trim( $keyword ), ENT_QUOTES );
+                    $count++;
+                    
+                    if ( $count < count( $keywords ) ) {
+                        $gd_titlematch_part .= "( " . $wpdb->posts . ".post_title LIKE '" . $keyword . "' OR " . $wpdb->posts . ".post_title LIKE '" . $keyword . "%%' OR " . $wpdb->posts . ".post_title LIKE '%% " . $keyword . "%%' ) " . $key . " ";
+                    } else {
+                        $gd_titlematch_part .= "( " . $wpdb->posts . ".post_title LIKE '" . $keyword . "' OR " . $wpdb->posts . ".post_title LIKE '" . $keyword . "%%' OR " . $wpdb->posts . ".post_title LIKE '%% " . $keyword . "%%' ) ";
+                    }
+                }
+                
+                $gd_titlematch_part .= "THEN 1 ELSE 0 END AS " . $part . ",";
+            }
+        }
+        
+        $search = stripslashes_deep( $search );
+        $search = wp_specialchars_decode( $search, ENT_QUOTES );
+        
+        $fields .= $wpdb->prepare( ", CASE WHEN " . $table . ".is_featured = '1' THEN 1 ELSE 0 END AS gd_featured, CASE WHEN " . $wpdb->posts . ".post_title LIKE %s THEN 1 ELSE 0 END AS gd_exacttitle, " . $gd_titlematch_part . " CASE WHEN ( " . $wpdb->posts . ".post_title LIKE %s OR " . $wpdb->posts . ".post_title LIKE %s OR " . $wpdb->posts . ".post_title LIKE %s ) THEN 1 ELSE 0 END AS gd_titlematch, CASE WHEN ( " . $wpdb->posts . ".post_content LIKE %s OR " . $wpdb->posts . ".post_content LIKE %s OR " . $wpdb->posts . ".post_content LIKE %s OR " . $wpdb->posts . ".post_content LIKE %s ) THEN 1 ELSE 0 END AS gd_content", array( $search, $search, $search . '%', '% ' . $search . '%', $search, $search . ' %', '% ' . $search . ' %', '% ' . $search ) );
     }
     
     return $fields;
