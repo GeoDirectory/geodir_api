@@ -790,7 +790,7 @@ function geodir_rest_listing_posts_clauses_orderby( $orderby, $post_type, $query
         
         if ( is_array( $keywords ) && $klimit = get_option( 'geodir_search_word_limit' ) ) {
             foreach ( $keywords as $kkey => $kword ) {
-                if ( mb_strlen( $kword, 'UTF-8' ) <= $klimit ) {
+                if ( geodir_utf8_strlen( $kword, 'UTF-8' ) <= $klimit ) {
                     unset( $keywords[$kkey] );
                 }
             }
@@ -937,7 +937,7 @@ function geodir_rest_listing_posts_clauses_fields( $fields, $post_type, $query_v
         
         if ( is_array( $keywords ) && $klimit = get_option( 'geodir_search_word_limit' ) ) {
             foreach( $keywords as $kkey => $kword ) {
-                if ( mb_strlen( $kword, 'UTF-8' ) <= $klimit ) {
+                if ( geodir_utf8_strlen( $kword, 'UTF-8' ) <= $klimit ) {
                     unset( $keywords[$kkey] );
                 }
             }
