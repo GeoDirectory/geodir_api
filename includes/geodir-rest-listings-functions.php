@@ -367,7 +367,7 @@ function geodir_rest_advance_fields_to_schema( $schema, $post_type, $package_id,
             'type'           => 'integer',
             'context'        => array( 'view', 'edit' ),
             'title'          => __( 'Select package' ),
-            'description'    => __( 'Select a lisitng package.' ),
+            'description'    => __( 'Select a listing package.' ),
             'required'       => true,
             'default'        => !empty( $default_package->pid ) ? (int)$default_package->pid : 0,
         );
@@ -587,6 +587,8 @@ function geodir_rest_advance_fields_to_schema( $schema, $post_type, $package_id,
 add_filter( 'geodir_listing_item_schema', 'geodir_rest_advance_fields_to_schema', 10, 4 );
 
 function geodir_rest_listing_collection_params( $params, $post_type_obj ) {
+    global $geodir_search_fields;
+    
     $post_type          = $post_type_obj->name;
     
     // Listing sorting
@@ -647,6 +649,86 @@ function geodir_rest_listing_collection_params( $params, $post_type_obj ) {
             'sanitize_callback'  => 'sanitize_text_field',
         );
     }
+    
+    // Filter options
+    $params['featured_only'] = array(
+        'description'  => __( 'Whether to show only featured listings.' ),
+        'type'         => 'boolean',
+        'default'      => false,
+    );
+    
+    $params['pics_only'] = array(
+        'description'  => __( 'Whether to show only listings with photos.' ),
+        'type'         => 'boolean',
+        'default'      => false,
+    );
+    
+    $params['videos_only'] = array(
+        'description'  => __( 'Whether to show only listings with videos.' ),
+        'type'         => 'boolean',
+        'default'      => false,
+    );
+    
+    $params['special_only'] = array(
+        'description'  => __( 'Whether to show only listings with special offers.' ),
+        'type'         => 'boolean',
+        'default'      => false,
+    );
+    
+    $params['favorites_only'] = array(
+        'description'  => __( 'Whether to show only listings favorited by user.' ),
+        'type'         => 'boolean',
+        'default'      => false,
+    );
+    
+    $params['favorites_by_user'] = array(
+        'description'  => __( 'Filter the listings favorited by user. Should be user ID or empty.' ),
+        'type'         => 'int',
+        'default'      => NULL,
+    );
+    
+    if ( geodir_rest_is_active( 'advance_search' ) ) {
+        if ( empty( $geodir_search_fields ) ) {
+            $fields = geodir_rest_advance_search_fields( $post_type, true );
+            $geodir_search_fields = $fields;
+        } else {
+            $fields = $geodir_search_fields;
+        }
+
+        if ( !empty( $fields ) ) {
+            $search_fields = array();
+            
+            foreach ( $fields as $field ) {
+                if ( $field->field_site_type == 'fieldset' || empty( $field->site_htmlvar_name ) || empty( $field->field_site_type ) ) {
+                    continue;
+                }
+                $title = !empty( $field->front_search_title ) ? $field->front_search_title : $field->field_site_name;
+                $description = !empty( $field->field_desc ) ? $field->field_desc : '';
+                $description = !empty( $description ) ? $title . ': ' . $description : $title;
+                
+                $search_field = array();
+                $search_field['name'] = $field->site_htmlvar_name;
+                $search_field['description'] = $description;
+                $search_field['type'] = 'string';
+                $search_field['default'] = NULL;
+
+                $search_field = apply_filters( 'geodir_rest_register_advance_search_field_' . $field->field_site_type, $search_field, $field );
+
+                if ( !empty( $search_field ) ) {
+                    $htmlvar_name = !empty( $search_field['name'] ) ? $search_field['name'] : $field->site_htmlvar_name;
+                    $search_fields[ $htmlvar_name ] = $search_field;
+                    if ( !empty( $search_field['append'] ) ) {
+                        $search_fields[ $search_field['append']['name'] ] = $search_field['append'];
+                    }
+                }
+            }
+            
+            if ( !empty( $search_fields ) ) {
+                $search_fields = apply_filters( 'geodir_rest_register_advance_search_fields', $search_fields, $post_type );
+                $params = array_merge( $params, $search_fields );
+            }
+        }
+    }
         
     return $params;
 }
@@ -705,10 +787,10 @@ function geodir_rest_listing_query( $args, $request ) {
             $args[$arg] = $request[$arg]; 
         }
     }
-    
+
     add_filter( 'posts_clauses_request', 'geodir_rest_listing_posts_clauses_request', 10, 2 );
 
-    return $args;
+    return apply_filters( 'geodir_rest_listing_query', $args, $request );
 }
 
 function geodir_rest_listing_posts_clauses_request( $clauses, $WP_Query ) {
@@ -1062,6 +1144,44 @@ function geodir_rest_listing_location_where( $where, $post_type, $query_vars ) {
 }
 add_filter( 'geodir_rest_listing_posts_clauses_where', 'geodir_rest_listing_location_where', 10, 3 );
 
+function geodir_rest_listing_posts_custom_fields_where( $where, $post_type, $query_vars ) {
+    global $wpdb, $geodir_api_request, $geodir_search_fields;
+    
+    if ( empty( $query_vars['is_gd_api'] ) || empty( $post_type ) ) {
+        return $where;
+    }
+    
+    $listing_table      = geodir_rest_post_table( $post_type );
+    
+    if ( !empty( $query_vars['featured_only'] ) ) {
+        $where .= " AND " . $listing_table . ".is_featured = '1'";
+    }
+    
+    if ( !empty( $query_vars['pics_only'] ) ) {
+        $where .= " AND " . $listing_table . ".featured_image != '' AND " . $listing_table . ".featured_image IS NOT NULL";
+    }
+    
+    if ( !empty( $query_vars['videos_only'] ) ) {
+        $where .= " AND " . $listing_table . ".geodir_video != '' AND " . $listing_table . ".geodir_video IS NOT NULL";
+    }
+    
+    if ( !empty( $query_vars['special_only'] ) ) {
+        $where .= " AND " . $listing_table . ".geodir_special_offers != '' AND " . $listing_table . ".geodir_special_offers IS NOT NULL";
+    }
+    
+    if ( geodir_rest_is_active( 'advance_search' ) ) {
+        if ( empty( $geodir_search_fields ) ) {
+            $fields = geodir_rest_advance_search_fields( $post_type, true );
+            $geodir_search_fields = $fields;
+        } else {
+            $fields = $geodir_search_fields;
+        }
+    }
+    
+    return $where;
+}
+add_filter( 'geodir_rest_listing_posts_clauses_where', 'geodir_rest_listing_posts_custom_fields_where', 11, 3 );
+
 function geodir_rest_listing_events_filter( $where, $post_type, $query_vars ) {
     global $wpdb;
     
@@ -1082,3 +1202,302 @@ function geodir_rest_listing_events_filter( $where, $post_type, $query_vars ) {
     return $where;
 }
 add_filter( 'geodir_rest_listing_posts_clauses_where', 'geodir_rest_listing_events_filter', 11, 3 );
+
+function geodir_rest_get_search_field_schema( $schema, $field, $terms = array() ) {
+    $post_type = $field->post_type;
+    $name = $field->site_htmlvar_name;
+    $field_type = !empty( $field->field_site_type ) ? strtolower( $field->field_site_type ) : '';
+    $input_type = !empty( $field->field_input_type ) ? strtolower( $field->field_input_type ) : '';
+    $expand_search = !empty( $field->expand_search ) && in_array( $input_type, array( 'link', 'check', 'radio', 'range' ) ) ? absint( $field->expand_search ) : 0;
+    $search_condition = !empty( $field->search_condition ) ? strtolower( $field->search_condition ) : '';
+    $expand_value = $field->expand_custom_value;
+
+    switch ( $input_type ) {
+        case 'check':
+        case 'link':
+        case 'radio':
+        case 'select': {
+            $field_info = geodir_rest_get_field_info_by_name( $name, $post_type, true );
+            
+            $values = array( '' );
+            if ( $field_type == 'taxonomy' ) {
+                if ( !empty( $terms ) ) {
+                    $values = array_merge( $values, array_values( $terms ) );
+                }
+            } else {
+                if ( !empty( $field_info->options ) ) {
+                    foreach ( $field_info->options as $option ) {
+                        if ( empty( $option['optgroup'] ) && isset( $option['value'] ) && $option['value'] !== '' ) {
+                            $values[] = $option['value'];
+                        }
+                    }
+                }
+            }
+            
+            $schema['name'] = 's' . $name;
+            $schema['type'] = 'array';
+            $schema['items'] = array(
+                'enum' => $values,
+                'type' => 'string',
+            );
+        }
+        break;
+        case 'range': {
+            $min_value_f = absint( $field->search_min_value );
+            $min_value = !empty( $field->search_min_value ) && (int)$field->search_min_value > 0 ? absint( $field->search_min_value ) : 10;
+            $max_value = !empty( $field->search_max_value ) && (int)$field->search_max_value > 0 ? absint( $field->search_max_value ) : 50;
+            $difference = !empty( $field->search_diff_value ) && (int)$field->search_diff_value > 0 ? absint( $field->search_diff_value ) : 10;
+            $range_mode = $field->searching_range_mode;
+            
+            $i = $min_value_f;
+            $j = $min_value_f;
+            $k = 0;
+            
+            switch ( $search_condition ) {
+                case 'single': {
+                    $schema['name'] = 's' . $name;
+                }
+                break;
+                case 'from': {
+                    $start_text = __( 'Start search value', 'geodiradvancesearch' );
+                    $end_text = __( 'End search value', 'geodiradvancesearch' );
+                    
+                    $schema['name'] = 'smin' . $name;
+                    $schema['append'] = $schema;
+                    $schema['append']['name'] = 'smax' . $name;
+                    
+                    $schema['description'] = !empty( $schema['description'] ) ? $schema['description'] . ' (' . $start_text . ')' : $start_text;
+                    $schema['append']['description'] = !empty( $schema['append']['description'] ) ? $schema['append']['description'] . ' (' . $end_text . ')' : $end_text;
+                }
+                break;
+                case 'link':
+                case 'select': {
+                    $values = array( '' );
+                    
+                    while ( $i <= $max_value ) {
+                        if ( $k == 0 ) {
+                            $value = $min_value . '-Less';
+                            $k++;
+                        } else {
+                            if ( $i <= $max_value ) {
+                                $value = $j . '-' . $i;
+                                if ( $difference == 1 && $range_mode == 1 ) {
+                                    $value = $j . '-Less';
+                                }
+                            } else {
+                                $value = $j . '-' . $i;
+                                if ( $difference == 1 && $range_mode == 1 ) {
+                                    $value         = $j . '-Less';
+                                }
+                            }
+                            $j = $i;
+                        }
+                        
+                        $i = $i + $difference;
+                        
+                        if ( $i > $max_value ) {
+                            $value = $max_value . '-More';
+                        }
+                        
+                        $values[] = $value;
+                    }
+                    
+                    $schema['name'] = 's' . $name;
+                    $schema['type'] = 'array';
+                    $schema['items'] = array(
+                        'enum' => $values,
+                        'type' => 'string',
+                    );
+                }
+                break;
+                case 'radio': {
+                    $values = array( '' );
+                    
+                    for ( $i = $difference; $i <= $max_value; $i = $i + $difference ) {
+                        $values[] = $i;
+                    }
+                    
+                    $schema['name'] = 's' . $name;
+                    $schema['type'] = 'array';
+                    $schema['items'] = array(
+                        'enum' => $values,
+                        'type' => 'string',
+                    );
+                }
+                break;
+            }
+        }
+        break;
+        case 'date':
+        default: {
+            $schema['name'] = 's' . $name;
+            
+            if ( $field_type == 'checkbox' || $name == 'geodir_special_offers' ) {
+                $schema['type'] = 'boolean';
+                $schema['default'] = false;
+            }
+        }
+        break;
+    }
+    
+    return $schema;
+}
+
+function geodir_rest_process_query_vars( $args, $request ) {
+    global $geodir_api_request;
+    
+    $geodir_api_request = $request;
+    
+    $boolean_args = array( 'featured_only', 'pics_only', 'videos_only', 'special_only', 'favorites_only' );
+    
+    foreach ( $boolean_args as $arg ) {
+        if ( !empty( $request[$arg] ) ) {
+            $args[$arg] = (bool)$request[$arg]; 
+        }
+    }
+    
+    if ( !empty( $args['favorites_only'] ) ) {
+        $args['favorites_by_user'] = !empty( $request['favorites_by_user'] ) ? absint( $request['favorites_by_user'] ) : 0;
+        
+        if ( $args['favorites_by_user'] > 0 ) {
+        } else if ( $current_user_id = get_current_user_id() ) {
+            $args['favorites_by_user'] = $current_user_id;
+        } else {
+            $args['favorites_by_user'] = 0;
+        }
+        
+        $favorites = $args['favorites_by_user'] > 0 ? get_user_meta( $args['favorites_by_user'], 'gd_user_favourite_post', true ) : array();
+        $favorites = !empty( $favorites ) && is_array( $favorites ) ? $favorites : array( '0' );
+        
+        $args['post__in'] = !empty( $args['post__in'] ) ? array_merge( $args['post__in'], $favorites ) : $favorites;
+    }
+
+    return $args;
+}
+add_filter( 'geodir_rest_listing_query', 'geodir_rest_process_query_vars', 10, 2 );
+
+function geodir_rest_register_advance_search_field_address( $schema, $field ) {
+    $schema = geodir_rest_get_search_field_schema( $schema, $field );
+    
+    if ( !empty( $schema ) ) {
+        $schema['name'] = 's' . $field->site_htmlvar_name . '_address';
+    }
+    
+    return $schema;
+}
+add_filter( 'geodir_rest_register_advance_search_field_address', 'geodir_rest_register_advance_search_field_address', 10, 2 );
+
+function geodir_rest_register_advance_search_field_checkbox( $schema, $field ) {    
+    return geodir_rest_get_search_field_schema( $schema, $field );
+}
+add_filter( 'geodir_rest_register_advance_search_field_checkbox', 'geodir_rest_register_advance_search_field_checkbox', 10, 2 );
+
+function geodir_rest_register_advance_search_field_datepicker( $schema, $field ) {
+    $name = $field->site_htmlvar_name;
+    
+    $start_text = __( 'Start search date', 'geodiradvancesearch' );
+    $end_text = __( 'End search date', 'geodiradvancesearch' );
+            
+    if ( $name == 'event' ) {
+        if ( $field->search_condition == 'SINGLE' ) {
+            $schema['name'] = 'event_start';
+        } else if ( $field->search_condition == 'FROM' ) {
+            $schema['name'] = 'event_start';
+            $schema['append'] = $schema;
+            $schema['append']['name'] = 'event_end';
+            
+            $schema['description'] = !empty( $schema['description'] ) ? $schema['description'] . ' (' . $start_text . ')' : $start_text;
+            $schema['append']['description'] = !empty( $schema['append']['description'] ) ? $schema['append']['description'] . ' (' . $end_text . ')' : $end_text;
+        }
+    } else {
+        if ( $field->search_condition == 'SINGLE' ) {
+            $schema['name'] = 's' . $name;
+        } else if ( $field->search_condition == 'FROM' ) {
+            $schema['name'] = 'smin' . $name;
+            $schema['append'] = $schema;
+            $schema['append']['name'] = 'smax' . $name;
+            
+            $schema['description'] = !empty( $schema['description'] ) ? $schema['description'] . ' (' . $start_text . ')' : $start_text;
+            $schema['append']['description'] = !empty( $schema['append']['description'] ) ? $schema['append']['description'] . ' (' . $end_text . ')' : $end_text;
+        }
+    }
+    return $schema;
+}
+add_filter( 'geodir_rest_register_advance_search_field_datepicker', 'geodir_rest_register_advance_search_field_datepicker', 10, 2 );
+
+function geodir_rest_register_advance_search_field_distance( $schema, $field ) {
+    $field_schema = geodir_rest_get_search_field_schema( $schema, $field );
+    
+    if ( !empty( $field->extra_fields ) && !empty( $field->extra_fields['is_sort'] ) ) {
+        $values = array( '' );
+        
+        if ( !empty( $field->extra_fields['asc'] ) ) {
+            $values[] = 'nearest';
+        }
+        
+        if ( !empty( $field->extra_fields['desc'] ) ) {
+            $values[] = 'farthest';
+        }
+        
+        $schema['name'] = 'sort_by';
+        $schema['type'] = 'array';
+        $schema['items'] = array(
+            'enum' => $values,
+            'type' => 'string',
+        );
+        
+        if ( !empty( $field_schema ) ) {
+            $schema['append'] = $field_schema;
+        }
+    }
+    
+    return $schema;
+}
+add_filter( 'geodir_rest_register_advance_search_field_distance', 'geodir_rest_register_advance_search_field_distance', 10, 2 );
+
+function geodir_rest_register_advance_search_field_multiselect( $schema, $field ) {
+    return geodir_rest_get_search_field_schema( $schema, $field );
+}
+add_filter( 'geodir_rest_register_advance_search_field_multiselect', 'geodir_rest_register_advance_search_field_multiselect', 10, 2 );
+
+function geodir_rest_register_advance_search_field_radio( $schema, $field ) {
+    return geodir_rest_get_search_field_schema( $schema, $field );
+}
+add_filter( 'geodir_rest_register_advance_search_field_radio', 'geodir_rest_register_advance_search_field_radio', 10, 2 );
+
+function geodir_rest_register_advance_search_field_select( $schema, $field ) {
+    return geodir_rest_get_search_field_schema( $schema, $field );
+}
+add_filter( 'geodir_rest_register_advance_search_field_select', 'geodir_rest_register_advance_search_field_select', 10, 2 );
+
+function geodir_rest_register_advance_search_field_taxonomy( $schema, $field ) {
+    if ( $field->field_input_type == 'SELECT' ) {
+        $args = array( 'orderby' => 'name', 'order' => 'ASC', 'hide_empty' => true, 'fields' => 'ids' );
+    } else {
+        $args = array( 'orderby' => 'count', 'order' => 'DESC', 'hide_empty' => true, 'fields' => 'ids' );
+    }
+
+    $args = apply_filters( 'geodir_rest_filter_term_args', $args, $field->site_htmlvar_name );
+    
+    $terms = apply_filters( 'geodir_rest_filter_terms', get_terms( $field->site_htmlvar_name, $args ) );
+
+    return geodir_rest_get_search_field_schema( $schema, $field, $terms );
+}
+add_filter( 'geodir_rest_register_advance_search_field_taxonomy', 'geodir_rest_register_advance_search_field_taxonomy', 10, 2 );
+
+function geodir_rest_register_advance_search_field_text( $schema, $field ) {
+    return geodir_rest_get_search_field_schema( $schema, $field );
+}
+add_filter( 'geodir_rest_register_advance_search_field_text', 'geodir_rest_register_advance_search_field_text', 10, 2 );
+
+function geodir_rest_register_advance_search_field_textarea( $schema, $field ) {
+    $schema['name'] = 's' . $field->site_htmlvar_name;
+    
+    return $schema;
+}
+add_filter( 'geodir_rest_register_advance_search_field_textarea', 'geodir_rest_register_advance_search_field_textarea', 10, 2 );
+
+function geodir_rest_register_advance_search_field_time( $schema, $field ) {
+    return geodir_rest_get_search_field_schema( $schema, $field );
+}
+add_filter( 'geodir_rest_register_advance_search_field_time', 'geodir_rest_register_advance_search_field_time', 10, 2 );
