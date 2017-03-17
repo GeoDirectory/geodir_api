@@ -688,11 +688,11 @@ function geodir_rest_listing_collection_params( $params, $post_type_obj ) {
     );
     
     if ( geodir_rest_is_active( 'advance_search' ) ) {
-        if ( empty( $geodir_search_fields ) ) {
+        if ( empty( $geodir_search_fields[ $post_type ] ) ) {
             $fields = geodir_rest_advance_search_fields( $post_type, true );
-            $geodir_search_fields = $fields;
+            $geodir_search_fields[ $post_type ] = $fields;
         } else {
-            $fields = $geodir_search_fields;
+            $fields = $geodir_search_fields[ $post_type ];
         }
 
         if ( !empty( $fields ) ) {
@@ -1147,11 +1147,14 @@ add_filter( 'geodir_rest_listing_posts_clauses_where', 'geodir_rest_listing_loca
 function geodir_rest_listing_posts_custom_fields_where( $where, $post_type, $query_vars ) {
     global $wpdb, $geodir_api_request, $geodir_search_fields;
     
-    if ( empty( $query_vars['is_gd_api'] ) || empty( $post_type ) ) {
+    if ( empty( $query_vars['is_gd_api'] ) || empty( $post_type ) || empty( $geodir_api_request ) ) {
         return $where;
     }
     
-    $listing_table      = geodir_rest_post_table( $post_type );
+    $get_params = $geodir_api_request->get_query_params();
+    $post_params = $geodir_api_request->get_body_params();
+        
+    $listing_table = geodir_rest_post_table( $post_type );
     
     if ( !empty( $query_vars['featured_only'] ) ) {
         $where .= " AND " . $listing_table . ".is_featured = '1'";
@@ -1169,12 +1172,179 @@ function geodir_rest_listing_posts_custom_fields_where( $where, $post_type, $que
         $where .= " AND " . $listing_table . ".geodir_special_offers != '' AND " . $listing_table . ".geodir_special_offers IS NOT NULL";
     }
     
-    if ( geodir_rest_is_active( 'advance_search' ) ) {
-        if ( empty( $geodir_search_fields ) ) {
+    if ( geodir_rest_is_active( 'advance_search' ) && ( !empty( $get_params ) || !empty( $post_params ) ) ) {
+        if ( empty( $geodir_search_fields[ $post_type ] ) ) {
             $fields = geodir_rest_advance_search_fields( $post_type, true );
-            $geodir_search_fields = $fields;
+            $geodir_search_fields[ $post_type ] = $fields;
         } else {
-            $fields = $geodir_search_fields;
+            $fields = $geodir_search_fields[ $post_type ];
+        }
+        
+        if ( !empty( $fields ) ) {
+            $adv_search_where = '';
+            
+            foreach ( $fields as $field ) {
+                $htmlvar_name = !empty( $field->site_htmlvar_name ) ? $field->site_htmlvar_name : '';
+                $input_type = !empty( $field->field_input_type ) ? strtoupper( $field->field_input_type ) : '';
+                $search_condition = !empty( $field->search_condition ) ? strtoupper( $field->search_condition ) : '';
+                $data_type = !empty( $field->field_data_type ) ? strtoupper( $field->field_data_type ) : '';
+                $extra_fields = !empty( $field->extra_fields ) ? $field->extra_fields : array();
+                $search_operator = !empty( $extra_fields ) && !empty( $extra_fields['search_operator'] ) && $extra_fields['search_operator'] == 'OR' ? 'OR' : 'AND';
+
+                if ( empty( $htmlvar_name ) ) {
+                    continue;
+                }
+                
+                switch ( $input_type ) {
+                    case 'RANGE': {
+                        switch ( $search_condition ) {
+                            case 'SINGLE':
+                            case 'RADIO': {
+                                if ( isset( $get_params[ 's' . $htmlvar_name ] ) && $get_params[ 's' . $htmlvar_name ] !== '' ) {
+                                    $value = esc_attr( $get_params[ 's' . $htmlvar_name ] );
+                                    $adv_search_where .= " AND " . $listing_table . '.' . $htmlvar_name . " = '" . $value . "'";
+                                }
+                            }
+                            break;
+                            case 'FROM': {
+                                if ( isset( $get_params[ 'smin' . $htmlvar_name ] ) && $get_params[ 'smin' . $htmlvar_name ] !== '' ) {
+                                    $value = esc_attr( $get_params[ 'smin' . $htmlvar_name ] );
+                                    $adv_search_where .= " AND " . $listing_table . '.' . $htmlvar_name . " >= '" . $value . "'";
+                                }
+                                
+                                if ( isset( $get_params[ 'smax' . $htmlvar_name ] ) && $get_params[ 'smax' . $htmlvar_name ] !== '' ) {
+                                    $value = esc_attr( $get_params[ 'smax' . $htmlvar_name ] );
+                                    $adv_search_where .= " AND " . $listing_table . '.' . $htmlvar_name . " <= '" . $value . "'";
+                                }
+                            }
+                            break;
+                            default : {
+                                if ( isset( $get_params[ 's' . $htmlvar_name ] ) && $get_params[ 's' . $htmlvar_name ] !== '' ) {
+                                    $value = esc_attr( $get_params[ 's' . $htmlvar_name ] );
+                                    $values = explode( '-', $value );
+                                    
+                                    $first_value = isset( $values[0] ) ? ( $values[0] ) : '';
+                                    $second_value = isset( $values[0] ) ? trim( $values[1] ) : '';
+                                    
+                                    $condition = $second_value != '' ? substr( $second_value, 0, 4 ) : '';
+                                    
+                                    if ( $condition == 'Less' ) {
+                                        if ( $first_value !== '' ) {
+                                            $adv_search_where .= " AND " . $listing_table . '.' . $htmlvar_name . " <= '" . $first_value . "'";
+                                        }
+                                    } else if ( $condition == 'More' ) {
+                                        if ( $first_value !== '' ) {
+                                            $adv_search_where .= " AND " . $listing_table . '.' . $htmlvar_name . " >= '" . $first_value . "'";
+                                        }
+                                    } else if ( $first_value !== '' && $second_value !== '' ) {
+                                        $adv_search_where .= " AND " . $listing_table . '.' . $htmlvar_name . " BETWEEN '" . $first_value . "' AND '" . $second_value . "'";
+                                    }
+                                }
+                            }
+                            break;
+                        }
+                    }
+                    break;
+                    case 'DATE': {
+                        $is_single = $search_condition == 'SINGLE' ? true : false;
+                        $min_value = '';
+                        $max_value = '';
+                        
+                        if ( $htmlvar_name == 'event' ) {
+                            if ( isset( $get_params[ 'event_start' ] ) && $get_params[ 'event_start' ] !== '' ) {
+                                $min_value = esc_attr( $get_params[ 'event_start' ] );
+                            }
+                            
+                            if ( isset( $get_params[ 'event_end' ] ) && $get_params[ 'event_end' ] !== '' ) {
+                                $max_value = esc_attr( $get_params[ 'event_end' ] );
+                            }
+                        } else {
+                            switch ( $search_condition ) {
+                                case 'SINGLE':
+                                default : {
+                                    if ( isset( $get_params[ 's' . $htmlvar_name ] ) && $get_params[ 's' . $htmlvar_name ] !== '' ) {
+                                        $min_value = esc_attr( $get_params[ 's' . $htmlvar_name ] );
+                                    }
+                                }
+                                break;
+                                case 'FROM': {
+                                    if ( isset( $get_params[ 'smin' . $htmlvar_name ] ) && $get_params[ 'smin' . $htmlvar_name ] !== '' ) {
+                                        $min_value = esc_attr( $get_params[ 'smin' . $htmlvar_name ] );
+                                    }
+                                    
+                                    if ( isset( $get_params[ 'smax' . $htmlvar_name ] ) && $get_params[ 'smax' . $htmlvar_name ] !== '' ) {
+                                        $max_value = esc_attr( $get_params[ 'smax' . $htmlvar_name ] );
+                                    }
+                                }
+                                break;
+                            }
+                            
+                            if ( $min_value !== '' || $max_value !== '' ) {
+                                $field_name = $listing_table . '.' . $htmlvar_name;
+                                
+                                if ( $data_type == 'TIME' ) {
+                                    $min_value = $min_value !== '' ? "'" . $min_value . ":00'" : '';
+                                    $max_value = $max_value !== '' ? "'" . $max_value . ":00'" : '';
+                                } else {
+                                    $field_name = "UNIX_TIMESTAMP( " . $listing_table . '.' . $htmlvar_name . " )";
+                                    
+                                    $field_info = geodir_rest_get_field_info_by_name( $htmlvar_name, $post_type, true );
+                                    $date_format = !empty( $field_info->extra_fields['date_format'] ) ? $field_info->extra_fields['date_format'] : 'Y-m-d';
+                                    
+                                    $min_value = $min_value !== '' ? geodir_date( $min_value, 'Y-m-d', $date_format ) : '';
+                                    $max_value = $max_value !== '' ? geodir_date( $max_value, 'Y-m-d', $date_format ) : '';
+                                    
+                                    $min_value = $min_value !== '' ? "UNIX_TIMESTAMP( " . $min_value . " )" : '';
+                                    $max_value = $max_value !== '' ? "UNIX_TIMESTAMP( " . $max_value . " )" : '';
+                                }
+                                
+                                if ( $is_single ) {
+                                    $adv_search_where .= " AND " . $field_name . " = " . $min_value;
+                                } else {
+                                    if ( $min_value !== '' ) {
+                                        $adv_search_where .= " AND " . $field_name . " >= " . $min_value;
+                                    }
+                                    
+                                    if ( $max_value !== '' ) {
+                                        $adv_search_where .= " AND " . $field_name . " <= " . $max_value;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    break;
+                    default: {
+                        $htmlvar_name = $htmlvar_name == 'post' ? 'post_address' : $htmlvar_name;
+                        
+                        if ( isset( $get_params[ 's' . $htmlvar_name ] ) ) {
+                            $value = $get_params[ 's' . $htmlvar_name ];
+                            
+                            if ( is_array( $value ) && !empty( $value ) ) {
+                                $search_values = array();
+                                
+                                foreach ( $value as $field_value ) {
+                                    if ( $field_value !== '' ) {
+                                        $search_values[] = $wpdb->prepare( "FIND_IN_SET( %s, " . $listing_table . "." . $htmlvar_name . " )", $field_value );
+                                    }
+                                }
+
+                                if ( !empty( $search_values ) ) {
+                                    $adv_search_where .= " AND ( " . implode( " " . $search_operator . " ", $search_values ) . " )";
+                                }
+                            } else if ( !is_array( $value ) && $value !== '' ) {
+                                $adv_search_where .= " AND " . $listing_table . "." . $htmlvar_name . " LIKE '%" . esc_attr( $value ) . "%'";
+                            }
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+        
+        if ( !empty( $adv_search_where ) ) {
+            $adv_search_where = apply_filters( 'geodir_rest_listing_advance_search_where', $adv_search_where, $post_type );
+            
+            $where .= $adv_search_where;
         }
     }
     
@@ -1235,11 +1405,17 @@ function geodir_rest_get_search_field_schema( $schema, $field, $terms = array() 
             }
             
             $schema['name'] = 's' . $name;
-            $schema['type'] = 'array';
-            $schema['items'] = array(
-                'enum' => $values,
-                'type' => 'string',
-            );
+            if ( $input_type == 'check' ) {
+                $schema['type'] = 'array';
+                $schema['items'] = array(
+                    'enum' => $values,
+                    'type' => 'string',
+                );
+            } else {
+                $schema['type'] = 'string';
+                $schema['enum'] = $values;
+            }
+            $schema['default'] = "";
         }
         break;
         case 'range': {
@@ -1303,11 +1479,9 @@ function geodir_rest_get_search_field_schema( $schema, $field, $terms = array() 
                     }
                     
                     $schema['name'] = 's' . $name;
-                    $schema['type'] = 'array';
-                    $schema['items'] = array(
-                        'enum' => $values,
-                        'type' => 'string',
-                    );
+                    $schema['type'] = 'string';
+                    $schema['enum'] = $values;
+                    $schema['default'] = "";
                 }
                 break;
                 case 'radio': {
@@ -1318,11 +1492,9 @@ function geodir_rest_get_search_field_schema( $schema, $field, $terms = array() 
                     }
                     
                     $schema['name'] = 's' . $name;
-                    $schema['type'] = 'array';
-                    $schema['items'] = array(
-                        'enum' => $values,
-                        'type' => 'string',
-                    );
+                    $schema['type'] = 'string';
+                    $schema['enum'] = $values;
+                    $schema['default'] = "";
                 }
                 break;
             }
@@ -1440,11 +1612,9 @@ function geodir_rest_register_advance_search_field_distance( $schema, $field ) {
         }
         
         $schema['name'] = 'sort_by';
-        $schema['type'] = 'array';
-        $schema['items'] = array(
-            'enum' => $values,
-            'type' => 'string',
-        );
+        $schema['type'] = 'string';
+        $schema['enum'] = $values;
+        $schema['default'] = '';
         
         if ( !empty( $field_schema ) ) {
             $schema['append'] = $field_schema;
