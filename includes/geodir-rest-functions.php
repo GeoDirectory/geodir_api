@@ -175,6 +175,9 @@ function geodir_rest_is_active( $option ) {
         case 'claim':
             $return = defined( 'GEODIRCLAIM_VERSION' ) && get_option( 'geodir_claim_enable' ) == 'yes' ? true : false;
             break;
+        case 'advance_search':
+            $return = defined( 'GEODIRADVANCESEARCH_VERSION' ) ? true : false;
+            break;
         default:
             $return = false;
             break;
@@ -436,4 +439,83 @@ function geodir_rest_get_location_type( $type ) {
     }
     
     return NULL;
+}
+
+function geodir_rest_advance_search_fields( $post_type, $formatted = false ) {
+    global $wpdb;
+    
+    if ( !geodir_rest_is_active( 'advance_search' ) ) {
+        return NULL;
+    }
+    
+    $sql = $wpdb->prepare( "SELECT * FROM `" . GEODIR_ADVANCE_SEARCH_TABLE . "` WHERE post_type = %s ORDER BY sort_order ASC", array( $post_type ) );
+    $search_fields = $wpdb->get_results( $sql );
+    
+    if ( $formatted && !empty( $search_fields ) ) {
+        foreach ( $search_fields as $key => $search_field ) {
+            if ( !empty( $search_field->field_site_name ) ) {
+                $search_field->field_site_name = stripslashes( __( $search_field->field_site_name, 'geodirectory' ) );
+            }
+            
+            if ( !empty( $search_field->front_search_title ) ) {
+                $search_field->front_search_title = stripslashes( __( $search_field->front_search_title, 'geodirectory' ) );
+            }
+            
+            if ( !empty( $search_field->first_search_text ) ) {
+                $search_field->first_search_text = stripslashes( __( $search_field->first_search_text, 'geodirectory' ) );
+            }
+            
+            if ( !empty( $search_field->last_search_text ) ) {
+                $search_field->last_search_text = stripslashes( __( $search_field->last_search_text, 'geodirectory' ) );
+            }
+            
+            if ( !empty( $search_field->field_desc ) ) {
+                $search_field->field_desc = stripslashes( __( $search_field->field_desc, 'geodirectory' ) );
+            }
+            
+            $search_field->extra_fields = !empty( $search_field->extra_fields ) ? maybe_unserialize( $search_field->extra_fields ) : array();
+            
+            $search_fields[$key] = $search_field;
+        }
+    }
+
+    return apply_filters( 'geodir_rest_advance_search_fields', $search_fields, $post_type );
+}
+
+function geodir_rest_get_field_info_by_name( $name, $post_type, $formatted = false ) {
+    global $wpdb;
+    
+    $sql = $wpdb->prepare( "SELECT * FROM " . GEODIR_CUSTOM_FIELDS_TABLE . " WHERE post_type = %s AND htmlvar_name=%s", array( $post_type, $name ) );
+    $field_info =  $wpdb->get_row( $sql );
+    
+    if ( $formatted && !empty( $field_info ) ) {
+        if ( !empty( $field_info->admin_title ) ) {
+            $field_info->admin_title = stripslashes( __( $field_info->admin_title, 'geodirectory' ) );
+        }
+        
+        if ( !empty( $field_info->admin_desc ) ) {
+            $field_info->admin_desc = stripslashes( __( $field_info->admin_desc, 'geodirectory' ) );
+        }
+        
+        if ( !empty( $field_info->site_title ) ) {
+            $field_info->site_title = stripslashes( __( $field_info->site_title, 'geodirectory' ) );
+        }
+        
+        if ( !empty( $field_info->clabels ) ) {
+            $field_info->clabels = stripslashes( __( $field_info->clabels, 'geodirectory' ) );
+        }
+        
+        if ( !empty( $field_info->required_msg ) ) {
+            $field_info->required_msg = stripslashes( __( $field_info->required_msg, 'geodirectory' ) );
+        }
+        
+        if ( !empty( $field_info->validation_msg ) ) {
+            $field_info->validation_msg = stripslashes( __( $field_info->validation_msg, 'geodirectory' ) );
+        }
+        
+        $field_info->options = !empty( $field_info->option_values ) ? geodir_string_values_to_options( $field_info->option_values, true ) : NULL; 
+        $field_info->extra_fields = !empty( $field_info->extra_fields ) ? maybe_unserialize( $field_info->extra_fields ) : array();
+    }
+    
+    return $field_info;
 }
