@@ -12,6 +12,7 @@ Description: GeoDirectory Rest API Integration :)
 Author: GeoDirectory
 Version: 0.0.1
 Author URI: https://wpgeodirectory.com/
+Update URL: https://github.com/GeoDirectory/geodir_api/
 */
 
 // MUST have WordPress.
@@ -22,6 +23,14 @@ if ( !defined( 'WPINC' ) ) {
 if ( !defined( 'GEODIR_REST_VERSION' ) ) {
     define( 'GEODIR_REST_VERSION', '0.0.1' );
 }
+
+//GEODIRECTORY UPDATE CHECKS
+if (is_admin()) {
+    if (!function_exists('ayecode_show_update_plugin_requirement')) {//only load the update file if needed
+        require_once('gd_update.php'); // require update script
+    }
+}
+
 
 if ( !class_exists('Geodir_REST') ) {
     class Geodir_REST {
