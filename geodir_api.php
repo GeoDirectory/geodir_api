@@ -10,7 +10,7 @@ Plugin Name: GeoDirectory Rest API
 Plugin URI: https://wpgeodirectory.com/
 Description: GeoDirectory Rest API Integration :)
 Author: GeoDirectory
-Version: 0.0.1
+Version: 0.0.3
 Author URI: https://wpgeodirectory.com/
 Update URL: https://github.com/GeoDirectory/geodir_api/
 */
