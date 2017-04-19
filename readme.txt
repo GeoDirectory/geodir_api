@@ -3,7 +3,7 @@ Contributors: stiofansisland
 Donate link: http://wpgeodirectory.com/
 Tags: business directory plugin, business-directory, businesses, directories, directory, directory plugin, api, rest api
 Requires at least: 4.7
-Tested up to: 4.7
+Tested up to: 4.7.3
 Stable tag: 0.0.3
 License: GPLv3
 License URI: http://www.gnu.org/licenses/gpl-3.0.html
@@ -19,6 +19,9 @@ GeoDirectory Rest API Integration :)
 * 
 
 == Changelog ==
+
+= 0.0.4 =
+Schema added for post images to add listing images - CHANGED
 
 = 0.0.3 =
 Fail to get reviews when review rating addon not installed - FIXED

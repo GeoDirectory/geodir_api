@@ -466,7 +466,7 @@ class Geodir_REST_Listings_Controller extends WP_REST_Posts_Controller {
 	 * @return WP_REST_Response|WP_Error Response object on success, or WP_Error object on failure.
 	 */
 	public function create_item( $request ) {
-        global $post, $wpdb, $gd_permalink_cache;
+        global $post, $wpdb, $gd_permalink_cache, $gd_session;
         
 		if ( ! empty( $request['id'] ) ) {
 			return new WP_Error( 'rest_post_exists', __( 'Cannot create existing post.' ), array( 'status' => 400 ) );
@@ -479,6 +479,11 @@ class Geodir_REST_Listings_Controller extends WP_REST_Posts_Controller {
 		}
 
 		$prepared_post->post_type = $this->post_type;
+        
+        $session_listing = !empty( $gd_session ) ? $gd_session->get( 'listing' ) : '';
+        if ( !empty( $session_listing ) ) {
+            $gd_session->un_set('listing');
+        }
 
 		$post_id = wp_insert_post( wp_slash( (array) $prepared_post ), true );
         
@@ -489,7 +494,12 @@ class Geodir_REST_Listings_Controller extends WP_REST_Posts_Controller {
             $post = get_post( $post_id );
             
             $gd_post = $this->prepare_item_for_geodir_database( $request, $post_id );
+            
             $post_id = geodir_save_listing( $gd_post, null, true );
+        }
+        
+        if ( !empty( $session_listing ) ) {
+            $gd_session->set( 'listing', $session_listing );
         }
 
 		if ( is_wp_error( $post_id ) ) {
@@ -582,7 +592,7 @@ class Geodir_REST_Listings_Controller extends WP_REST_Posts_Controller {
 	 * @return WP_REST_Response|WP_Error Response object on success, or WP_Error object on failure.
 	 */
 	public function update_item( $request ) {
-        global $post, $wpdb;
+        global $post, $wpdb, $gd_session;
         
 		$id   = (int) $request['id'];
 		$post = get_post( $id );
@@ -596,13 +606,24 @@ class Geodir_REST_Listings_Controller extends WP_REST_Posts_Controller {
 		if ( is_wp_error( $post ) ) {
 			return $post;
 		}
+        
+                    
+        $session_listing = !empty( $gd_session ) ? $gd_session->get( 'listing' ) : '';
+        if ( !empty( $session_listing ) ) {
+            $gd_session->un_set('listing');
+        }
 
 		// convert the post object to an array, otherwise wp_update_post will expect non-escaped input.
 		$post_id = wp_update_post( wp_slash( (array) $post ), true );
         
         if ( !is_wp_error( $post_id ) ) {
             $gd_post = $this->prepare_item_for_geodir_database( $request, $post_id );
+            
             $post_id = geodir_save_listing( $gd_post, null, true );
+        }
+        
+        if ( !empty( $session_listing ) ) {
+            $gd_session->set( 'listing', $session_listing );
         }
 
 		if ( is_wp_error( $post_id ) ) {
@@ -773,6 +794,13 @@ class Geodir_REST_Listings_Controller extends WP_REST_Posts_Controller {
         
         $schema = array();
         
+        $schema[ 'post_images' ] = array(
+            'type'          => 'string',
+            'context'       => array( 'view', 'edit' ),
+            'title'         => __( 'Listing images', 'geodir_rest' ),
+            'description'   => __( 'Comma separated list of listing images urls. First image will be set as a featured image for the listing.', 'geodir_rest' ),
+        );
+        
         foreach ( $custom_fields as $id => $field ) {
             $admin_use              = (bool)$field['for_admin_use'];
             
@@ -791,13 +819,16 @@ class Geodir_REST_Listings_Controller extends WP_REST_Posts_Controller {
             $options                = !empty( $field['option_values'] ) ? stripslashes_deep( $field['options'] ) : array();
             $rendered_options       = !empty( $field['option_values'] ) ? stripslashes_deep( geodir_string_values_to_options( $field['option_values'], true ) ) : array();
             $enum                   = $rendered_options ? geodir_rest_get_enum_values( $rendered_options ) : array();
+            $arg_options            = array( 
+                'validate_callback' => 'geodir_rest_validate_request_arg' 
+            );
             $prefix                 = '';
             
             $args                   = array();
             $args['type']           = 'string';
             $args['context']        = array( 'view', 'edit' );
             $args['title']          = $title;
-            $args['description']    = $description;
+            $args['description']    = !empty( $description ) ? $description : $title;
             $args['required']       = (bool)$required;
             $args['default']        = $default;
             
@@ -917,9 +948,6 @@ class Geodir_REST_Listings_Controller extends WP_REST_Posts_Controller {
                 case 'datepicker':
                     $args['type']       = 'object';
                     $args['format']     = 'date-time';
-                    if ( !empty( $extra_fields['date_format'] ) ) {
-                        $args['date_format'] = $extra_fields['date_format'];
-                    }
                     $args['properties'] = array(
                         'raw' => array(
                             'description' => __( 'Date for the object, as it exists in the database.' ),
@@ -933,6 +961,9 @@ class Geodir_REST_Listings_Controller extends WP_REST_Posts_Controller {
                             'readonly'    => true,
                         ),
                     );
+                    if ( !empty( $extra_fields['date_format'] ) ) {
+                        $arg_options['date_format'] = $extra_fields['date_format'];
+                    }
                     break;
                 case 'email':
                     $args['format'] = 'email';
@@ -957,7 +988,7 @@ class Geodir_REST_Listings_Controller extends WP_REST_Posts_Controller {
                     );
                     
                     if ( !empty( $extra_fields['gd_file_types'] ) ) {
-                        $args['file_types'] = $extra_fields['gd_file_types'];
+                        $arg_options['file_types'] = $extra_fields['gd_file_types'];
                     }
                     break;
                 case 'html':
@@ -977,9 +1008,9 @@ class Geodir_REST_Listings_Controller extends WP_REST_Posts_Controller {
                     );
                     break;
                 case 'multiselect':
-                    $args['type']       = 'object';
+                    $args['type']       = 'array';
                     $args['enum']       = $enum;
-                    $args['items']      = array( 'type' => 'array' );
+                    $args['items']      = array( 'type' => 'string' );
                     $args['properties'] = array(
                         'raw' => array(
                             'description' => __( 'Field for the object, as it exists in the database.' ),
@@ -993,7 +1024,7 @@ class Geodir_REST_Listings_Controller extends WP_REST_Posts_Controller {
                             'readonly'    => true,
                         ),
                     );
-                    $args['display_type']   = !empty( $extra_fields ) ? $extra_fields : 'select';
+                    $arg_options['display_type']        = !empty( $extra_fields ) ? $extra_fields : 'select';
                     break;
                 case 'radio':
                     $args['type']           = 'object';
@@ -1046,15 +1077,18 @@ class Geodir_REST_Listings_Controller extends WP_REST_Posts_Controller {
                 continue;
             }
             
+            if ( !empty( $rendered_options ) ) {
+                $arg_options['rendered_options']   = $rendered_options;
+            }
+            
             $args['field_type']     = $field_type;
             $args['data_type']      = $data_type;
             $args['extra_fields']   = $extra_fields;
             if ( !empty( $options ) ) {
                 $args['field_options']   = $options;
             }
-            if ( !empty( $rendered_options ) ) {
-                $args['rendered_options']   = $rendered_options;
-            }
+            
+            $args['arg_options']   = $arg_options;
             
             $schema[ $prefix . $name ]    = apply_filters( 'geodir_listing_fields_args', $args, $field );
         }

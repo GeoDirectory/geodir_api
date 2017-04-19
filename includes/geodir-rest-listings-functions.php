@@ -576,8 +576,8 @@ function geodir_rest_advance_fields_to_schema( $schema, $post_type, $package_id,
             'title'          => __( 'Is Claimed?' ),
             'description'    => __( 'Listing is claimed or not?' ),
             'required'       => true,
-            'default'        => 0,
-            'enum'           => array( 1, 0 ),
+            'default'        => '0',
+            'enum'           => array( '1', '0' ),
             'items'          => array( 'type' => 'integer' ),
         );
     }
