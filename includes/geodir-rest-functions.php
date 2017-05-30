@@ -58,6 +58,10 @@ add_filter('rest_query_vars', 'geodir_rest_query_vars', 10, 1);
 function geodir_rest_comments_clauses( $clauses, $comment_query ) {
     global $wpdb;
     
+    if ( empty( $comment_query->query_vars['geodir_rest_route'] ) ) {
+        return $clauses;
+    }
+    
     $is_reviewrating = function_exists( 'geodir_reviewrating_comments_shorting' ) ? true : false;
     
     $comment_sorting = $comment_query->query_vars['orderby'];
@@ -79,12 +83,23 @@ function geodir_rest_comments_clauses( $clauses, $comment_query ) {
     }
     $clauses['join'] .= " LEFT JOIN " . GEODIR_REVIEW_TABLE . " AS gdr ON gdr.comment_id=" . $wpdb->comments . ".comment_ID";
     $clauses['orderby'] = str_replace( GEODIR_REVIEW_TABLE, 'gdr', $review_sorting['orderby'] );
+    
+    if ( !empty( $clauses['where'] ) ) {
+        $clauses['where'] = str_replace( ' user_id ',' ' . $wpdb->comments . '.user_id ', $clauses['where'] );
+    }
+    
     return $clauses;
 }
 
 function geodir_rest_get_comment( $comment ) {
     global $wpdb;
     
+    $comment_post_type = !empty( $comment->comment_post_ID ) ? get_post_type( $comment->comment_post_ID ) : '';
+    
+    if ( !geodir_rest_is_gd_post_type( $comment_post_type ) ) {
+        return $comment;
+    }
+
     $is_reviewrating = function_exists( 'geodir_reviewrating_comments_shorting' ) ? true : false;
     
     $fields = '';
@@ -93,6 +108,7 @@ function geodir_rest_get_comment( $comment ) {
     }
     
     $query = "SELECT gdr.`id` AS review_id, gdr.`post_title`, gdr.`post_type`, gdr.`rating_ip`, gdr.`ratings`, gdr.`overall_rating`, gdr.`comment_images`, gdr.`wasthis_review`, gdr.`status` AS review_status, gdr.`post_status` AS review_post_status, gdr.`post_date`, gdr.`post_city` AS city, gdr.`post_region` AS region, gdr.`post_country` AS country, gdr.`post_latitude` AS latitude, gdr.`post_longitude` AS longitude, gdr.`comment_content` AS review " . $fields . " FROM " . GEODIR_REVIEW_TABLE . " AS gdr WHERE gdr.comment_id = " . (int)$comment->comment_ID;
+    
     $review = $wpdb->get_row( $query );
     
     if (!empty($review)) {
@@ -657,4 +673,22 @@ function geodir_rest_validate_value_from_schema( $value, $args, $param = '' ) {
     }
 
     return true;
+}
+
+function geodir_rest_is_gd_post_type( $post_type ) {
+    global $gd_post_types;
+    
+    if ( empty( $post_type ) ) {
+        return false;
+    }
+    
+    if ( empty( $gd_post_types ) ) {
+        $gd_post_types = geodir_get_posttypes();
+    }
+    
+    if ( !empty( $gd_post_types ) && in_array( $post_type, $gd_post_types ) ) {
+        return true;
+    }
+    
+    return false;
 }

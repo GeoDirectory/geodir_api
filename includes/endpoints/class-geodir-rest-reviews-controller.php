@@ -159,6 +159,8 @@ class Geodir_REST_Reviews_Controller extends WP_REST_Comments_Controller {
 		);
 
 		$prepared_args = array();
+        
+		$prepared_args['geodir_rest_route'] = true;
 
 		/*
 		 * For each known parameter which is both registered and present in the request,
