@@ -126,6 +126,35 @@ function geodir_rest_custom_gd_data($data, $post_id) {
         $payment_invoices = geodir_rest_get_payment_invoices($post_id);
         $data['payment_invoices'] = $payment_invoices;
     }
+    if ( isset( $post->distance ) && $post->distance !== '' ) {
+        $unit_search = get_option('geodir_search_dist_1');
+        $distance = round((float)$post->distance, 2);
+        
+        if ($distance == 0) {
+            $unit_near = get_option('geodir_search_dist_2');
+            
+            if ( $unit_near == 'feet' ) {
+                $unit = __('feet', 'geodirectory');
+                $multiply = $unit_search == 'miles' ? 5280 : 3280.84;
+            } else {
+                $unit = __('meters', 'geodirectory');
+                $multiply = $unit_search == 'miles' ? 1609.34 : 1000;
+            }
+            
+            $distance = round((float)$post->distance * $multiply);
+        } else {
+            if ( $unit_search == 'miles' ) {
+                $unit = __('miles', 'geodirectory');
+            } else {
+                $unit = __('km', 'geodirectory');
+            }
+        }
+        
+        $data['distance'] = array(
+            'raw' => $post->distance,
+            'rendered' => $distance . ' ' . $unit 
+        );
+    }
         
     return $data;
 }
@@ -687,6 +716,18 @@ function geodir_rest_listing_collection_params( $params, $post_type_obj ) {
         'default'      => NULL,
     );
     
+    $params['latitude'] = array(
+        'description'  => __( 'Filter by latitude.' ),
+        'type'         => 'string',
+        'default'      => NULL,
+    );
+    
+    $params['longitude'] = array(
+        'description'  => __( 'Filter by longitude.' ),
+        'type'         => 'string',
+        'default'      => NULL,
+    );
+    
     if ( geodir_rest_is_active( 'advance_search' ) ) {
         if ( empty( $geodir_search_fields[ $post_type ] ) ) {
             $fields = geodir_rest_advance_search_fields( $post_type, true );
@@ -780,7 +821,7 @@ function geodir_rest_listing_query( $args, $request ) {
         $args['gd_country'] = $request['country'];
     }
     
-    $keep_args = array( 'snear', 'all_near_me', 'near_me_range', 'user_lat', 'user_lon', 'my_location' );
+    $keep_args = array( 'sdist', 'sort_by', 'latitude', 'longitude' ); // GPS search
     
     foreach ( $keep_args as $arg ) {
         if ( !isset( $args[$arg] ) && isset( $request[$arg] ) ) {
@@ -817,13 +858,14 @@ function geodir_rest_listing_posts_clauses_request( $clauses, $WP_Query ) {
 function geodir_rest_listing_posts_clauses_orderby( $orderby, $post_type, $query_vars ) {
     $default_orderby = $orderby;
     $table = geodir_rest_post_table( $post_type );
-    
-    $sorting = !empty( $query_vars['orderby'] ) ? $query_vars['orderby'] : geodir_get_posts_default_sort( $post_type );
 
-    if ( !empty( $query_vars['s'] ) ) {
-        if ( !empty( $query_vars['snear'] ) && $sorting != 'farthest' ) {
-            $sorting = 'nearest';
-        }
+    $sorting = !empty( $query_vars['orderby'] ) ? $query_vars['orderby'] : geodir_get_posts_default_sort( $post_type );
+    if ( !empty($query_vars['sort_by']) && in_array($query_vars['sort_by'], array('nearest', 'farthest')) ) {
+        $sorting = $query_vars['sort_by'];
+    }
+    
+    if ( ($sorting == 'nearest' || $sorting == 'farthest') && (empty($query_vars['latitude']) || empty($query_vars['longitude'])) ) {
+        $sorting = geodir_get_posts_default_sort( $post_type );
     }
 
     switch ( $sorting ) {
@@ -864,7 +906,7 @@ function geodir_rest_listing_posts_clauses_orderby( $orderby, $post_type, $query
             $sort_by = $sorting;
             break;
     }
-   
+
     $orderby = geodir_rest_listing_custom_orderby( $orderby, $sort_by, $post_type, $query_vars );
 
     if ( !empty( $query_vars['s'] ) ) {
@@ -996,20 +1038,11 @@ function geodir_rest_listing_posts_clauses_fields( $fields, $post_type, $query_v
         $fields .= ", " . EVENT_SCHEDULE . ".*";
     }
     
-    $snear = isset( $query_vars['snear'] ) ? trim( $query_vars['snear'] ) : '';
+    $my_lat = !empty( $query_vars['latitude'] ) ? $query_vars['latitude'] : '';
+    $my_lon = !empty( $query_vars['longitude'] ) ? $query_vars['longitude'] : '';
         
-    if ( ( $snear != '' || !empty( $query_vars['all_near_me'] ) ) ) {
+    if ( !empty($my_lat) && !empty($my_lon) ) {
         $distance_radius = geodir_getDistanceRadius( get_option( 'geodir_search_dist_1' ) );
-        
-        $my_lat = !empty( $query_vars['user_lat'] ) ? $query_vars['user_lat'] : '';
-        $my_lon = !empty( $query_vars['user_lon'] ) ? $query_vars['user_lon'] : '';
-        
-        if ( empty( $my_lat ) || empty( $my_lon ) ) {
-            $default_location = geodir_get_default_location();
-            
-            $my_lat = !empty( $default_location->city_latitude ) ? $default_location->city_latitude : '0';
-            $my_lon = !empty( $default_location->city_longitude ) ? $default_location->city_longitude : '0';
-        }
 
         $fields .= ", ( " . $distance_radius . " * 2 * ASIN( SQRT( POWER( SIN( ( ABS( " . $my_lat . " ) - ABS( " . $table . ".post_latitude ) ) * PI() / 180 / 2 ), 2 ) + COS( ABS( " . $my_lat . " ) * PI() / 180 ) * COS( ABS( " . $table . ".post_latitude ) * PI() / 180 ) * POWER( SIN( ( " . $my_lon . " - " . $table . ".post_longitude ) * PI() / 180 / 2 ), 2 ) ) ) ) AS distance";
     }
@@ -1156,6 +1189,19 @@ function geodir_rest_listing_posts_custom_fields_where( $where, $post_type, $que
         
     $listing_table = geodir_rest_post_table( $post_type );
     
+    $location_allowed = function_exists( 'geodir_cpt_no_location' ) && geodir_cpt_no_location( $post_type ) ? false : true;
+    if ( $location_allowed && !empty($query_vars['latitude']) && !empty($query_vars['longitude']) ) {
+        $latitude = $query_vars['latitude'];
+        $longitude = $query_vars['longitude'];
+        
+        $near_me_range = !empty($query_vars['sdist']) && (float)$query_vars['sdist'] > 0 ? (float)$query_vars['sdist'] : (float)get_option('geodir_search_dist');
+        $near_me_range = $near_me_range > 0 ? $near_me_range : 40;
+        
+        $distance_radius = geodir_getDistanceRadius(get_option('geodir_search_dist_1'));
+
+        $where .= " AND ( ( " . $distance_radius . " * 2 * ASIN( SQRT( POWER( SIN( ( ABS( " . $latitude . " ) - ABS( " . $listing_table . ".post_latitude ) ) * PI() / 180 / 2 ), 2 ) + COS( ABS( " . $latitude . " ) * PI() / 180 ) * COS( ABS( " . $listing_table . ".post_latitude ) * PI() / 180 ) * POWER( SIN( ( " . $longitude . " - " . $listing_table . ".post_longitude ) * PI() / 180 / 2 ), 2 ) ) ) ) <= " . $near_me_range . " ) ";
+    }
+    
     if ( !empty( $query_vars['featured_only'] ) ) {
         $where .= " AND " . $listing_table . ".is_featured = '1'";
     }
@@ -1191,7 +1237,9 @@ function geodir_rest_listing_posts_custom_fields_where( $where, $post_type, $que
                 $extra_fields = !empty( $field->extra_fields ) ? $field->extra_fields : array();
                 $search_operator = !empty( $extra_fields ) && !empty( $extra_fields['search_operator'] ) && $extra_fields['search_operator'] == 'OR' ? 'OR' : 'AND';
 
-                if ( empty( $htmlvar_name ) ) {
+                $skip_fields = apply_filters( 'geodir_rest_get_listing_search_skip_fields', array( 'dist' ), $post_type );
+                
+                if ( empty( $htmlvar_name ) || (!empty($htmlvar_name) && in_array($htmlvar_name, $skip_fields)) ) {
                     continue;
                 }
                 
@@ -1488,13 +1536,18 @@ function geodir_rest_get_search_field_schema( $schema, $field, $terms = array() 
                     $values = array( '' );
                     
                     for ( $i = $difference; $i <= $max_value; $i = $i + $difference ) {
-                        $values[] = $i;
+                        $values[] = (string)$i;
                     }
                     
                     $schema['name'] = 's' . $name;
                     $schema['type'] = 'string';
                     $schema['enum'] = $values;
-                    $schema['default'] = "";
+                    
+                    if ( $name == 'dist' ) {
+                        $schema['default'] = (string)get_option('geodir_search_dist');
+                    } else {
+                        $schema['default'] = "";
+                    }
                 }
                 break;
             }
