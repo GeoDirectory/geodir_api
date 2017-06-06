@@ -565,13 +565,13 @@ function geodir_rest_validate_value_from_schema( $value, $args, $param = '' ) {
     if ( ! empty( $args['enum'] ) ) {
         if ( is_array( $value ) ) {
             foreach ( $value as $index => $v ) {
-                if ( ! in_array( $v, $args['enum'], true ) ) {
+                if ( ! in_array( $v, $args['enum'] ) ) {
                     /* translators: 1: parameter, 2: value, 3: list of valid values */
                     return new WP_Error( 'rest_invalid_param', sprintf( __( '%1$s value "%2$s" is not one of %3$s.' ), $param, $v, implode( ', ', $args['enum'] ) ) );
                 }
             }
         } else {
-            if ( ! in_array( $value, $args['enum'], true ) ) {
+            if ( ! in_array( $value, $args['enum'] ) ) {
                 /* translators: 1: parameter, 2: list of valid values */
                 return new WP_Error( 'rest_invalid_param', sprintf( __( '%1$s is not one of %2$s.' ), $param, implode( ', ', $args['enum'] ) ) );
             }
