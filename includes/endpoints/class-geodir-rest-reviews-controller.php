@@ -100,8 +100,22 @@ class Geodir_REST_Reviews_Controller extends WP_REST_Comments_Controller {
 		if ( ! current_user_can( 'edit_posts' ) ) {
 			$protected_params = array( 'author', 'author_exclude', 'author_email', 'type', 'status' );
 			$forbidden_params = array();
+			$user_id = (int)get_current_user_id();
 
 			foreach ( $protected_params as $param ) {
+				$author = false;
+				if ( !empty( $request['author'] ) && $user_id ) {
+					if ( is_array( $request['author'] ) && (int)$request['author'][0] == $user_id ) {
+						$author = true;
+					} elseif ( !is_array( $request['author'] ) && (int)$request['author'] == $user_id ) {
+						$author = true;
+					}
+				}
+                
+				if ( $author && 'author' === $param ) {
+					continue;
+				}
+                
 				if ( 'status' === $param ) {
 					if ( 'approve' !== $request[ $param ] ) {
 						$forbidden_params[] = $param;
