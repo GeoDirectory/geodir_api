@@ -1102,7 +1102,7 @@ function geodir_rest_listing_posts_clauses_join( $join, $post_type, $query_vars 
     $table = geodir_rest_post_table( $post_type );
         
     ########### WPML ###########
-    if ( function_exists( 'icl_object_id' ) && defined( 'ICL_LANGUAGE_CODE' ) && ICL_LANGUAGE_CODE ) {
+    if ( geodir_wpml_is_post_type_translated( $post_type ) && defined( 'ICL_LANGUAGE_CODE' ) && ICL_LANGUAGE_CODE ) {
         $join .= " JOIN " . $wpdb->prefix . "icl_translations AS icl_t ON icl_t.element_id = " . $wpdb->posts . ".ID";
     }
     ########### WPML ###########
