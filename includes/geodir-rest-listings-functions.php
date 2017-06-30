@@ -24,7 +24,7 @@ function geodir_rest_set_gd_var($args, $request) {
     if (empty($args['post_type'])) {
         return $args;
     }
-        
+    
     $gd_post_types = geodir_get_posttypes();
 
     if (in_array($args['post_type'], $gd_post_types)) {
