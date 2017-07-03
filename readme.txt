@@ -25,6 +25,8 @@ Schema added for post images to add listing images - CHANGED
 Get reviews by author endpoint changes - CHANGED
 Allow listing results to filter by latitude & longitude - CHANGED
 Subscribers should allowed to see their own reviews - FIXED
+Don't translate GD post types/taxonomies if disabled in WPML settings - CHANGED
+Add category icon & default image in category response - CHANGED
 
 = 0.0.3 =
 Fail to get reviews when review rating addon not installed - FIXED

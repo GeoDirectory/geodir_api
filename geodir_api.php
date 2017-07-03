@@ -216,6 +216,7 @@ if ( !class_exists('Geodir_REST') ) {
                 // categories
                 add_filter( 'rest_' . $post_type . 'category_collection_params', 'geodir_rest_taxonomy_collection_params', 10, 2 );
                 add_filter( 'rest_' . $post_type . 'category_query', 'geodir_rest_taxonomy_query', 10, 2 );
+                add_filter( 'rest_prepare_' . $post_type . 'category', 'geodir_rest_prepare_category_item_response', 10, 3 );
                 
                 // tags
                 add_filter( 'rest_' . $post_type . '_tags_collection_params', 'geodir_rest_taxonomy_collection_params', 10, 2 );
@@ -231,7 +232,6 @@ if ( !class_exists('Geodir_REST') ) {
                 add_filter( 'get_comment', 'geodir_rest_get_comment', 10, 1 );
                 
                 add_action( 'rest_insert_comment', array( $this, 'save_review' ), 10, 3 );
-                add_filter( 'rest_gd_placecategory_collection_params', 'geodir_rest_taxonomy_collection_params', 10, 2 );
             }
         }
         
