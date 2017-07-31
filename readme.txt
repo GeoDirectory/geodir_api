@@ -27,6 +27,7 @@ Allow listing results to filter by latitude & longitude - CHANGED
 Subscribers should allowed to see their own reviews - FIXED
 Don't translate GD post types/taxonomies if disabled in WPML settings - CHANGED
 Add category icon & default image in category response - CHANGED
+Sort by event start date not working - FIXED
 
 = 0.0.3 =
 Fail to get reviews when review rating addon not installed - FIXED
