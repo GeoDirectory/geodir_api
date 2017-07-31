@@ -313,13 +313,14 @@ function geodir_rest_get_field_by_name($field_name, $post_type) {
 
 function geodir_rest_get_listing_sorting( $post_type ) {
     $sort_options = geodir_get_sort_options( $post_type );
-    
     $sorting = array();
     
     $default_orderby = 'post_date';
     $default_order = 'desc';
     
     if ( !empty( $sort_options ) ) {
+        $has_default = false;
+        
         foreach ( $sort_options as $sort ) {
             $sort = stripslashes_deep( $sort ); // strip slashes
             
@@ -335,6 +336,7 @@ function geodir_rest_get_listing_sorting( $post_type ) {
             }
             
             if ( (int)$sort->is_default == 1 ) {
+                $has_default = true;
                 $default_order = $sort->sort_desc ? 'desc' : 'asc';
                 $default_orderby = $field_name . '_' . $default_order;
             }
@@ -354,7 +356,20 @@ function geodir_rest_get_listing_sorting( $post_type ) {
                 $sorting['random'] = $label;
             }
             
-            $orderby[] = $field_name ;
+            $orderby[] = $field_name;
+        }
+        
+        if ( !$has_default && !in_array( $default_orderby, $sorting ) ) {
+            $default_orderby = $default_orderby . '_' . $default_order;
+        }
+    }
+    
+    if ( $post_type == 'gd_event' ) {
+        if ( empty( $orderby ) ) {
+            $default_orderby = 'upcoming';
+        } else {
+            $sorting['upcoming'] = __( 'Upcoming', 'geodirevents' );
+            $orderby[] = 'upcoming';
         }
     }
     
@@ -950,7 +965,12 @@ function geodir_rest_listing_events_orderby_query( $orderby, $sorting, $default_
     $orderby = rtrim( trim( $orderby ), "," );
     
     if ( $post_type == 'gd_event' ) {
-        $orderby .= ", " . EVENT_SCHEDULE . ".event_date ASC, " . EVENT_SCHEDULE . ".event_starttime ASC";
+        if ( $sorting == 'upcoming' ) {
+            $current_date = date_i18n( 'Y-m-d H:i:s', current_time( 'timestamp' ) );
+            $orderby = "(CASE WHEN DATEDIFF(DATE(" . EVENT_SCHEDULE . ".event_date), '" . $current_date . "') < 0 THEN 1 ELSE 0 END), ABS(DATEDIFF(DATE(" . EVENT_SCHEDULE . ".event_date), '" . $current_date . "')) ASC, " . EVENT_SCHEDULE . ".event_starttime ASC";
+        } else {
+            $orderby .= ", " . EVENT_SCHEDULE . ".event_date ASC, " . EVENT_SCHEDULE . ".event_starttime ASC";
+        }
     }
    
     if ( strpos( $orderby, strtolower( $table . ".is_featured" )  ) === false ) {
@@ -1724,3 +1744,16 @@ function geodir_rest_register_advance_search_field_time( $schema, $field ) {
     return geodir_rest_get_search_field_schema( $schema, $field );
 }
 add_filter( 'geodir_rest_register_advance_search_field_time', 'geodir_rest_register_advance_search_field_time', 10, 2 );
+
+function geodir_rest_listing_events_clauses_groupby( $groupby, $post_type, $query_vars ) {
+    global $wpdb;
+    
+    if ( $post_type != 'gd_event' ) {
+        return $groupby;
+    }
+    
+    $groupby = "CONCAT(" . $wpdb->posts . ".ID, '-', " . EVENT_SCHEDULE . ".event_date)";
+    
+    return $groupby;
+}
+add_filter( 'geodir_rest_listing_posts_clauses_groupby', 'geodir_rest_listing_events_clauses_groupby', 10, 3 );
