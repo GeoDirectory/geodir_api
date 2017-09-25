@@ -1611,7 +1611,7 @@ function geodir_rest_process_query_vars( $args, $request ) {
             $args['favorites_by_user'] = 0;
         }
         
-        $favorites = $args['favorites_by_user'] > 0 ? get_user_meta( $args['favorites_by_user'], 'gd_user_favourite_post', true ) : array();
+        $favorites = $args['favorites_by_user'] > 0 ? geodir_get_user_favourites( $args['favorites_by_user'] ) : array();
         $favorites = !empty( $favorites ) && is_array( $favorites ) ? $favorites : array( '0' );
         
         $args['post__in'] = !empty( $args['post__in'] ) ? array_merge( $args['post__in'], $favorites ) : $favorites;
