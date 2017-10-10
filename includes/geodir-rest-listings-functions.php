@@ -882,6 +882,10 @@ function geodir_rest_listing_posts_clauses_orderby( $orderby, $post_type, $query
     if ( ($sorting == 'nearest' || $sorting == 'farthest') && (empty($query_vars['latitude']) || empty($query_vars['longitude'])) ) {
         $sorting = geodir_get_posts_default_sort( $post_type );
     }
+    
+    if ( !empty( $query_vars['s'] )  && empty( $query_vars['sort_by'] ) ) {
+        $sorting = 'az';
+    }
 
     switch ( $sorting ) {
         case 'az':
@@ -1136,6 +1140,81 @@ function geodir_rest_listing_posts_clauses_join( $join, $post_type, $query_vars 
     return $join;
 }
 add_filter( 'geodir_rest_listing_posts_clauses_join', 'geodir_rest_listing_posts_clauses_join', 10, 3 );
+
+function geodir_rest_listing_default_filter( $where, $post_type, $query_vars ) {
+    global $wpdb, $geodir_api_request, $geodir_search_fields;
+    
+    if ( empty( $query_vars['is_gd_api'] ) || empty( $post_type ) || empty( $geodir_api_request ) ) {
+        return $where;
+    }
+    
+    $get_params = $geodir_api_request->get_query_params();
+    $post_params = $geodir_api_request->get_body_params();
+        
+    $table = geodir_rest_post_table( $post_type );
+    
+    if ( isset( $query_vars['s'] ) && $query_vars['s'] != '' ) {
+        $taxonomies = geodir_get_taxonomies( $post_type, true );
+        if ( $taxonomies ) {
+            $taxonomies = implode( "','", $taxonomies );
+            $taxonomies = "'" . $taxonomies . "'";
+        } else {
+            $taxonomies = '';
+        }
+    
+        $title_search = $content_search = $terms_search = '';
+        $s = $query_vars['s'];
+        
+        if ( strstr( $s, ',' ) ) {
+            $s_AA = str_replace( " ", "", $s );
+            $s_A = explode( ",", $s_AA );
+            $s_A = '"' . implode( '","', $s_A ) . '"';
+        } else {
+            $s_A = '"' . $s . '"';
+        }
+        
+        $keywords = explode( " ", $s );
+        
+        if ( is_array( $keywords ) && $klimit = get_option( 'geodir_search_word_limit' ) ) {
+            foreach ( $keywords as $kkey => $kword ) {
+                if ( geodir_utf8_strlen( $kword, 'UTF-8' ) <= $klimit ) {
+                    unset( $keywords[$kkey] );
+                }
+            }
+        }
+        
+        if ( !empty( $keywords ) ) {
+            foreach ($keywords as $keyword ) {
+                $keyword = trim( $keyword );
+                $keyword = wp_specialchars_decode( $keyword ,ENT_QUOTES );
+
+                if ( $keyword != '' ) {
+                    $title_search .= apply_filters( "geodir_search_better_search_terms", ' OR ( ' . $wpdb->posts . '.post_title LIKE "' . $keyword . '" OR ' . $wpdb->posts . '.post_title LIKE "' . $keyword . '%" OR ' . $wpdb->posts . '.post_title LIKE "% ' . $keyword . '%" )', $keywords, $keyword );
+                }
+            }
+        }
+        
+        $content_search = apply_filters( "geodir_search_content_where", " OR ( " . $wpdb->posts . ".post_content LIKE \"$s\" OR " . $wpdb->posts . ".post_content LIKE \"$s%\" OR " . $wpdb->posts . ".post_content LIKE \"% $s%\" OR " . $wpdb->posts . ".post_content LIKE \"%>$s%\" OR " . $wpdb->posts . ".post_content LIKE \"%\n$s%\" )" );
+        
+        $terms_where = apply_filters( "geodir_search_terms_where", " AND ( " . $wpdb->terms . ".name LIKE \"$s\" OR " . $wpdb->terms . ".name LIKE \"$s%\" OR " . $wpdb->terms . ".name LIKE \"% $s%\" OR " . $wpdb->terms . ".name IN ( $s_A ) ) " );
+        $terms_sql = "SELECT $wpdb->term_taxonomy.term_id, $wpdb->terms.name, $wpdb->term_taxonomy.taxonomy FROM $wpdb->term_taxonomy, $wpdb->terms, $wpdb->term_relationships WHERE $wpdb->term_taxonomy.term_id = $wpdb->terms.term_id AND $wpdb->term_relationships.term_taxonomy_id = $wpdb->term_taxonomy.term_taxonomy_id AND $wpdb->term_taxonomy.taxonomy IN ( {$taxonomies} ) $terms_where GROUP BY $wpdb->term_taxonomy.term_id";
+        $term_results = $wpdb->get_results( $terms_sql );
+        if ( !empty( $term_results ) ) {
+            foreach ( $term_results as $term ) {
+                if ( $term->taxonomy == $post_type . '_tags' ) {
+                    $terms_search .= $wpdb->prepare( " OR FIND_IN_SET( %s , " . $table . ".post_tags )", $term->name );
+                } else {
+                    $terms_search .= " OR FIND_IN_SET( $term->term_id , " . $table . "." . $post_type . "category )";
+                }
+            }
+        }
+        
+        $where = " AND ( ( " . $wpdb->posts . ".post_title LIKE \"$s\" " . $title_search . " ) " . $content_search . " " . $terms_search . " ) AND " . $wpdb->posts . ".post_type = '" . $post_type . "' AND " . $wpdb->posts . ".post_status = 'publish' ";
+    }
+    
+    return $where;
+}
+add_filter( 'geodir_rest_listing_posts_clauses_where', 'geodir_rest_listing_default_filter', 0, 3 );
 
 function geodir_rest_listing_location_where( $where, $post_type, $query_vars ) {
     global $wpdb;
