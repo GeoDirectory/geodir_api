@@ -484,12 +484,13 @@ if ( !class_exists('Geodir_REST') ) {
             
             if ( geodir_rest_is_active( 'reviewrating' ) ) {
                 if ( !empty( $request['rating'] ) ) {
-                    $_REQUEST['geodir_rating'] = $request['rating'] ;
+                    $_REQUEST['geodir_rating'] = $request['rating'];
                 
                     geodir_reviewrating_save_rating( $comment->comment_ID );
                 }
             } else {
-                geodir_save_rating();
+                $_REQUEST['geodir_overallrating'] = $request['rating']['overall'];
+				geodir_save_rating( $comment->comment_ID );
             }
             
             ob_get_clean();

@@ -319,24 +319,15 @@ class Geodir_REST_Reviews_Controller extends WP_REST_Comments_Controller {
 	}
 
 	/**
-	 * Get a comment.
+	 * Retrieves a comment.
 	 *
-	 * @param  WP_REST_Request $request Full details about the request.
+	 * @param WP_REST_Request $request Full details about the request.
 	 * @return WP_Error|WP_REST_Response Response object on success, or error object on failure.
 	 */
 	public function get_item( $request ) {
-		$id = (int) $request['id'];
-
-		$comment = get_comment( $id );
-		if ( empty( $comment ) ) {
-			return new WP_Error( 'rest_comment_invalid_id', __( 'Invalid comment ID.' ), array( 'status' => 404 ) );
-		}
-
-		if ( ! empty( $comment->comment_post_ID ) ) {
-			$post = get_post( $comment->comment_post_ID );
-			if ( empty( $post ) ) {
-				return new WP_Error( 'rest_post_invalid_id', __( 'Invalid post ID.' ), array( 'status' => 404 ) );
-			}
+		$comment = $this->get_comment( $request['id'] );
+		if ( is_wp_error( $comment ) ) {
+			return $comment;
 		}
 
 		$data = $this->prepare_item_for_response( $comment, $request );
@@ -368,7 +359,7 @@ class Geodir_REST_Reviews_Controller extends WP_REST_Comments_Controller {
 			 *                                 response.
 			 */
 			$allow_anonymous = apply_filters( 'rest_allow_anonymous_comments', false, $request );
-			if ( false === $allow_anonymous ) {
+			if ( ! $allow_anonymous ) {
 				return new WP_Error( 'rest_comment_login_required', __( 'Sorry, you must be logged in to comment.' ), array( 'status' => 401 ) );
 			}
 		}
@@ -594,12 +585,12 @@ class Geodir_REST_Reviews_Controller extends WP_REST_Comments_Controller {
 	 * @return WP_Error|bool True if the request has access to update the item, error object otherwise.
 	 */
 	public function update_item_permissions_check( $request ) {
+		$comment = $this->get_comment( $request['id'] );
+		if ( is_wp_error( $comment ) ) {
+			return $comment;
+		}
 
-		$id = (int) $request['id'];
-
-		$comment = get_comment( $id );
-
-		if ( $comment && ! $this->check_edit_permission( $comment ) ) {
+		if ( ! $this->check_edit_permission( $comment ) ) {
 			return new WP_Error( 'rest_cannot_edit', __( 'Sorry, you are not allowed to edit this comment.' ), array( 'status' => rest_authorization_required_code() ) );
 		}
 
@@ -615,13 +606,12 @@ class Geodir_REST_Reviews_Controller extends WP_REST_Comments_Controller {
 	 * @return WP_Error|WP_REST_Response Response object on success, or error object on failure.
 	 */
 	public function update_item( $request ) {
-		$id = (int) $request['id'];
-
-		$comment = get_comment( $id );
-
-		if ( empty( $comment ) ) {
-			return new WP_Error( 'rest_comment_invalid_id', __( 'Invalid comment ID.' ), array( 'status' => 404 ) );
+		$comment = $this->get_comment( $request['id'] );
+		if ( is_wp_error( $comment ) ) {
+			return $comment;
 		}
+
+		$id = $comment->comment_ID;
 
 		if ( isset( $request['type'] ) && get_comment_type( $id ) !== $request['type'] ) {
 			return new WP_Error( 'rest_comment_invalid_type', __( 'Sorry, you are not allowed to change the comment type.' ), array( 'status' => 404 ) );
@@ -631,6 +621,13 @@ class Geodir_REST_Reviews_Controller extends WP_REST_Comments_Controller {
 
 		if ( is_wp_error( $prepared_args ) ) {
 			return $prepared_args;
+		}
+		
+		if ( ! empty( $prepared_args['comment_post_ID'] ) ) {
+			$post = get_post( $prepared_args['comment_post_ID'] );
+			if ( empty( $post ) ) {
+				return new WP_Error( 'rest_comment_invalid_post_id', __( 'Invalid post ID.' ), array( 'status' => 403 ) );
+			}
 		}
 
 		if ( empty( $prepared_args ) && isset( $request['status'] ) ) {
@@ -659,7 +656,7 @@ class Geodir_REST_Reviews_Controller extends WP_REST_Comments_Controller {
 
 			$updated = wp_update_comment( wp_slash( (array) $prepared_args ) );
 
-			if ( 0 === $updated ) {
+			if ( false === $updated ) {
 				return new WP_Error( 'rest_comment_failed_edit', __( 'Updating comment failed.' ), array( 'status' => 500 ) );
 			}
 
@@ -704,11 +701,9 @@ class Geodir_REST_Reviews_Controller extends WP_REST_Comments_Controller {
 	 * @return WP_Error|bool True if the request has access to delete the item, error object otherwise.
 	 */
 	public function delete_item_permissions_check( $request ) {
-		$id      = (int) $request['id'];
-		$comment = get_comment( $id );
-
-		if ( ! $comment ) {
-			return new WP_Error( 'rest_comment_invalid_id', __( 'Invalid comment ID.' ), array( 'status' => 404 ) );
+		$comment = $this->get_comment( $request['id'] );
+		if ( is_wp_error( $comment ) ) {
+			return $comment;
 		}
 
 		if ( ! $this->check_edit_permission( $comment ) ) {
@@ -726,14 +721,12 @@ class Geodir_REST_Reviews_Controller extends WP_REST_Comments_Controller {
 	 * @return WP_Error|WP_REST_Response Response object on success, or error object on failure.
 	 */
 	public function delete_item( $request ) {
-		$id    = (int) $request['id'];
-		$force = isset( $request['force'] ) ? (bool) $request['force'] : false;
-
-		$comment = get_comment( $id );
-
-		if ( empty( $comment ) ) {
-			return new WP_Error( 'rest_comment_invalid_id', __( 'Invalid comment ID.' ), array( 'status' => 404 ) );
+		$comment = $this->get_comment( $request['id'] );
+		if ( is_wp_error( $comment ) ) {
+			return $comment;
 		}
+
+		$force = isset( $request['force'] ) ? (bool) $request['force'] : false;
 
 		/**
 		 * Filters whether a comment can be trashed.
@@ -755,7 +748,7 @@ class Geodir_REST_Reviews_Controller extends WP_REST_Comments_Controller {
 		} else {
 			// If this type doesn't support trashing, error out.
 			if ( ! $supports_trash ) {
-				return new WP_Error( 'rest_trash_not_supported', __( 'The comment does not support trashing. Set force=true to delete.' ), array( 'status' => 501 ) );
+				return new WP_Error( 'rest_trash_not_supported', sprintf( __( "The comment does not support trashing. Set '%s' to delete." ), 'force=true' ), array( 'status' => 501 ) );
 			}
 
 			if ( 'trash' === $comment->comment_approved ) {
@@ -1117,7 +1110,7 @@ class Geodir_REST_Reviews_Controller extends WP_REST_Comments_Controller {
 	 */
 	public function get_item_schema() {
 		$schema = array(
-			'$schema'              => 'http://json-schema.org/schema#',
+			'$schema'              => 'http://json-schema.org/draft-04/schema#',
 			'title'                => 'comment',
 			'type'                 => 'object',
 			'properties'           => array(
@@ -1128,7 +1121,7 @@ class Geodir_REST_Reviews_Controller extends WP_REST_Comments_Controller {
 					'readonly'     => true,
 				),
 				'author'           => array(
-					'description'  => __( 'The id of the user object, if author was a user.' ),
+					'description'  => __( 'The ID of the user object, if author was a user.' ),
 					'type'         => 'integer',
 					'context'      => array( 'view', 'edit', 'embed' ),
 				),
@@ -1176,6 +1169,7 @@ class Geodir_REST_Reviews_Controller extends WP_REST_Comments_Controller {
 					'context'         => array( 'view', 'edit', 'embed' ),
 					'arg_options'     => array(
 						'sanitize_callback' => null, // Note: sanitization implemented in self::prepare_item_for_database()
+						'validate_callback' => null, // Note: validation implemented in self::prepare_item_for_database()
 					),
 					'properties'      => array(
 						'raw'         => array(
